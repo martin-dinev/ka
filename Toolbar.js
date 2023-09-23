@@ -9,6 +9,9 @@ function Toolbar( signals ) {
 		'toolbar/scale': 'Scale',
 		'toolbar/local': 'Local',
 		'toolbar/editPoints': 'Edit Points',
+		'toolbar/editLines': 'Edit Lines',
+		'toolbar/editFaces': 'Edit Faces',
+		'toolbar/allowEditFaces': 'Allow Edit Faces',
 	};
 
 	const container = new UIPanel();
@@ -66,7 +69,7 @@ function Toolbar( signals ) {
 	container.add( local );
 
 
-	const editPoints = new UICheckbox( false );
+	const editPoints = new UICheckbox( true );
 	editPoints.dom.title = strings[ 'toolbar/editPoints' ];
 	editPoints.onChange( function () {
 
@@ -74,6 +77,27 @@ function Toolbar( signals ) {
 
 	} );
 	container.add( editPoints );
+
+	const editLines = new UICheckbox( false );
+	editLines.dom.title = strings[ 'toolbar/editLines' ];
+	editLines.onChange( function () {
+		signals.editLinesChanged.dispatch( this.getValue() );
+	} );
+	container.add ( editLines );
+
+	const editFaces = new UICheckbox( true );
+	editFaces.dom.title = strings[ 'toolbar/editFaces' ];
+	editFaces.onChange( function () {
+		signals.editFacesChanged.dispatch( this.getValue() );
+	} );
+	container.add ( editFaces );
+
+	const allowEditFaces = new UICheckbox( false );
+	allowEditFaces.dom.title = strings[ 'toolbar/allowEditFaces' ];
+	allowEditFaces.onChange( function () {
+		signals.allowEditFacesChanged.dispatch( this.getValue() );
+	} );
+	container.add ( allowEditFaces );
 
 	//
 
