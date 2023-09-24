@@ -10,7 +10,7 @@ let container, stats, gui;
 let camera, scene, renderer;
 let controls, transformControls;
 let editorSignals, selection;
-let showEditPoints = true, showEditLines = false, showEditFaces = true, allowEditFaces = false;
+let showEditPoints = true, showEditLines = true, showEditFaces = true, allowEditFaces = false;
 
 const objectsGroup = new THREE.Group();
 const raycaster = new THREE.Raycaster();
@@ -99,101 +99,190 @@ function render() {
     renderer.render(scene, camera);
 }
 
+function addRef(first, second, firstName, secondName, firstStart, secondPos) {
+    console.assert(second.userData[secondName] === undefined, "Can't add a reference if it already exists, remove the old one first", firstName, first, secondName, second, secondPos);
+    let ref = {prev: undefined, next: undefined};
+    ref[firstName] = first;
+    ref[secondName] = second;
+    if (first.userData[firstStart] === undefined) first.userData[firstStart] = ref;
+    else {
+        ref.next = first.userData[firstStart];
+        first.userData[firstStart].prev = ref;
+        first.userData[firstStart] = ref;
+    }
+    second.userData[secondPos] = ref;
+}
+
+function removeRef(reference, firstName, secondName, firstStart, secondPos) {
+    let first = reference[firstName];
+    let second = reference[secondName];
+    if (reference.prev === undefined) first.userData[firstStart] = reference.next;
+    else reference.prev.next = reference.next;
+    if (reference.next !== undefined) reference.next.prev = reference.prev;
+    second.userData[secondPos] = undefined;
+}
+
+function addDoubleRef(first, second, firstName, secondName, firstStart, secondStart){ //todo maybe refactor firstStart the same way as prev and next
+    let ref = {};
+    let firstPrev = firstName + "Prev"; ref[firstPrev] = undefined;
+    let firstNext = firstName + "Next"; ref[firstNext] = undefined;
+    let secondPrev = secondName + "Prev"; ref[secondPrev] = undefined;
+    let secondNext = secondName + "Next"; ref[secondNext] = undefined;
+    ref[firstName] = first;
+    ref[secondName] = second;
+    if (first.userData[firstStart] === undefined) first.userData[firstStart] = ref;
+    else {
+        ref[firstNext] = first.userData[firstStart];
+        first.userData[firstStart][firstPrev] = ref;
+        first.userData[firstStart] = ref;
+    }
+    if (second.userData[secondStart] === undefined) second.userData[secondStart] = ref;
+    else {
+        ref[secondNext] = second.userData[secondStart];
+        second.userData[secondStart][secondPrev] = ref;
+        second.userData[secondStart] = ref;
+    }
+}
+
+/*
+
+function addVertexLineStartRef(vertex, line) {
+    console.assert(line.lineStart!==undefined, "line.linesStart is not undefined before assigning", vertex, line);
+
+    let lineRef = {vertex: vertex, line: line, prev: undefined, next: undefined};
+    if (vertex.userData.linesStartRef === undefined) vertex.userData.linesStartRef = lineRef;
+    else {
+        lineRef.next = vertex.userData.linesStartRef;
+        vertex.userData.linesStartRef.prev = lineRef;
+        vertex.userData.linesStartRef = lineRef;
+    }
+    line.userData.lineStart = lineRef;
+}
+
+function removeVertexLineStartRef(lineRef) {
+    let vertex = lineRef.vertex;
+    if (lineRef.prev === undefined) vertex.userData.linesStartRef = lineRef.next;
+    else lineRef.prev.next = lineRef.next;
+    if (lineRef.next !== undefined) lineRef.next.prev = lineRef.prev;
+    let line = lineRef.line;
+    line.userData.lineStart = undefined;
+}
+
+function addVertexLineEndRef(vertex, line) {
+    let lineRef = {vertex: vertex, line: line, prev: undefined, next: undefined};
+    if (vertex.userData.linesEnd === undefined) vertex.userData.linesEnd = lineRef;
+    else {
+        lineRef.next = vertex.userData.linesEnd;
+        vertex.userData.linesEnd.prev = lineRef;
+        vertex.userData.linesEnd = lineRef;
+    }
+}
+
+function removeVertexLineEndRef(lineRef) {
+    let vertex = lineRef.vertex;
+    if (lineRef.prev === undefined) vertex.userData.linesEndRef = lineRef.next;
+    else lineRef.prev.next = lineRef.next;
+    if (lineRef.next !== undefined) lineRef.next.prev = lineRef.prev;
+}
+
+function addVertexTriangleRef(vertex, triangle) {
+    let triangleRef = {vertex: vertex, triangle: triangle, prev: undefined, next: undefined};
+    if (vertex.userData.triangleRefers === undefined) vertex.userData.triangleRefers = triangleRef;
+    else {
+        triangleRef.next = vertex.userData.triangleRefers;
+        vertex.userData.triangleRefers.prev = triangleRef;
+        vertex.userData.triangleRefers = triangleRef;
+    }
+}
+
+function removeVertexTriangleRef(triangleRef) {
+    let vertex = triangleRef.vertex;
+    if (triangleRef.prev === undefined) vertex.userData.triangleRefers = triangleRef.next;
+    else triangleRef.prev.next = triangleRef.next;
+    if (triangleRef.next !== undefined) triangleRef.next.prev = triangleRef.prev;
+}
+*/
+
 function getNewVertex(verticesPosition1, verticesPosition2, verticesPosition3, i) {
     let pointObject = new Points();
     let point = new THREE.Vector3(verticesPosition1, verticesPosition2, verticesPosition3);
 
-    pointObject.userData.index = i / 3;
+    pointObject.userData.index = i;
     pointObject.userData.mathObject = point;
-    pointObject.userData.linesStart = [];
-    pointObject.userData.linesEnd = [];
-    pointObject.userData.triangleRefers = [];
-    pointObject.userData.position = new THREE.Vector3(0, 0, 0);
+    pointObject.userData.edgeStartRefers = undefined;
+    pointObject.userData.edgeEndRefers = undefined;
+    pointObject.userData.triangleRefers = undefined;
+    pointObject.userData.position = point.clone();
     pointObject.userData.locked = false;
+    pointObject.userData.locker = undefined;
 
+    pointObject.position.copy(pointObject.userData.position);
 
-    let bufferGeometry = (new THREE.BufferGeometry()).setFromPoints([new THREE.Vector3(0, 0, 0)]);
-    pointObject.position.copy(point);
-    pointObject.userData.position.copy(pointObject.position);
-    pointObject.geometry = bufferGeometry;
+    pointObject.geometry = (new THREE.BufferGeometry()).setFromPoints([new THREE.Vector3(0, 0, 0)]);
 
     pointObject.material = new THREE.PointsMaterial({color: 0xff00ff, size: 15, sizeAttenuation: false});
     return pointObject;
 }
 
 function getNewEdge(vertex1, vertex2, i) {
-    let lineObject = new THREE.Line();
+    let edgeObject = new THREE.Line();
 
-    lineObject.userData.startPoint = vertex1;
-    lineObject.userData.startPoint.userData.linesStart.push(lineObject);
-    lineObject.userData.endPoint = vertex2;
-    lineObject.userData.endPoint.userData.linesEnd.push(lineObject);
-    lineObject.userData.faceRefers = [];
-    lineObject.userData.triangleRefers = [];
+    edgeObject.userData.edgeStart = undefined;
+    addRef(vertex1, edgeObject, "vertex", "edge", "edgeStartRefers", "edgeStart");
+    edgeObject.userData.edgeEnd = undefined;
+    addRef(vertex2, edgeObject, "vertex", "edge", "edgeEndRefers", "edgeEnd");
 
-    let point1 = lineObject.userData.startPoint.userData.mathObject;
-    let point2 = lineObject.userData.endPoint.userData.mathObject;
+    edgeObject.userData.faceRefers = undefined;
+
+    let point1 = edgeObject.userData.edgeStart.vertex.userData.mathObject;
+    let point2 = edgeObject.userData.edgeEnd.vertex.userData.mathObject;
     let line = new THREE.Line3(point1, point2);
 
-    lineObject.userData.index = i;
-    lineObject.userData.mathObject = line;
-    lineObject.userData.position = new THREE.Vector3(0, 0, 0);
-    lineObject.userData.locked = false;
+    edgeObject.userData.index = i;
+    edgeObject.userData.mathObject = line;
+    edgeObject.userData.position = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
+    edgeObject.userData.locked = false;
+    edgeObject.userData.locker = undefined;
 
-    let midPoint = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
-    let startPoint = point1.clone().sub(midPoint);
-    let endPoint = point2.clone().sub(midPoint);
-    let lineGeometry = (new THREE.BufferGeometry()).setFromPoints([startPoint, endPoint]);
-    lineObject.position.copy(midPoint);
-    lineObject.userData.position.copy(lineObject.position);
-    lineObject.geometry = lineGeometry;
+    edgeObject.position.copy(edgeObject.userData.position);
 
-    lineObject.material = new THREE.LineBasicMaterial({
+    let midPoint = edgeObject.userData.position;
+    let geometryStartPoint = point1.clone().sub(midPoint);
+    let geometryEndPoint = point2.clone().sub(midPoint);
+    edgeObject.geometry = (new THREE.BufferGeometry()).setFromPoints([geometryStartPoint, geometryEndPoint]);
+
+    edgeObject.material = new THREE.LineBasicMaterial({
         color: Math.random() * 0xffffff,
         linewidth: 2,
     });
-    return lineObject;
+
+    return edgeObject;
 }
 
 function getNewFace(edgeList, i) {
     let faceObject = new THREE.Mesh();
     let edgeCount = edgeList.length;
 
-    let edges = new Array(edgeCount);
-    for (let i = 0; i < edgeCount; i++) {
-        edges[i] = {
-            par: faceObject,
-            edge: edgeList[i],
-            prev: undefined,
-            next: undefined,
-            dir: true
-        };
-    }
-
-    for (let i = 0; i < edgeCount; i++) {
-        if (i === 0) edges[i].prev = edges[edgeCount - 1];
-        else edges[i].prev = edges[i - 1];
-        if (i + 1 < edgeCount) edges[i].next = edges[i + 1];
-        else edges[i].next = edges[0];
-
-        if ([edges[i].next.edge.userData.startPoint, edges[i].next.edge.userData.endPoint].includes(edges[i].edge.userData.startPoint)) {
-            edges[i].dir = false;
-        }
-
-        edges[i].edge.userData.faceRefers.push({index: i, face: faceObject});
+    faceObject.userData.edges = undefined;
+    for (let i = edgeList.length -1 ; i >= 0; i--) {
+        addRef(edgeList[i], faceObject, "edge", "face", "faceRefers", "edges");
     }
 
     faceObject.userData.index = i;
-    faceObject.userData.mathObject = edges[0];
     faceObject.userData.edgeCount = edgeCount;
-    faceObject.userData.triangleRefers = [];
-    faceObject.userData.runningAveragePoints = new THREE.Vector3(0, 0, 0);
-    faceObject.userData.runningAverageNormal = new THREE.Vector3(0, 0, 0);
-    faceObject.userData.position = new THREE.Vector3(0, 0, 0);
+    // faceObject.userData.pointsSum = new THREE.Vector3(0, 0, 0);
+    // faceObject.userData.normalsSum = new THREE.Vector3(0, 0, 0);
+    // faceObject.userData.position = new THREE.Vector3(0, 0, 0);
+    // for(let edge of edgeList){
+    //     faceObject.userData.pointsSum.add(edge.position);
+    // }
+
+
     faceObject.userData.locked = false;
+    faceObject.userData.locker = undefined;
 
 
-    getFaceGeometry(faceObject);
+    // getFaceGeometry(faceObject);
 
     faceObject.material = new THREE.MeshNormalMaterial({
         // color: Math.random() * 0xffffff,
@@ -222,10 +311,9 @@ function addCube(dim = 250) {
         dimHalf, dimHalf, dimHalf
     ]);
     for (let i = 0; i < verticesPositions.length; i += 3) {
-        let pointObject = getNewVertex(verticesPositions[i], verticesPositions[i + 1], verticesPositions[i + 2], i);
+        let pointObject = getNewVertex(verticesPositions[i], verticesPositions[i + 1], verticesPositions[i + 2], i / 3);
         vertices.add(pointObject);
     }
-    vertices.visible = false;
     containerGroup.add(vertices);
 
     let edges = new THREE.Group();
@@ -239,11 +327,10 @@ function addCube(dim = 250) {
         let vertex1 = vertices.children[index1];
         let vertex2 = vertices.children[index2];
 
-        let lineObject = getNewEdge(vertex1, vertex2, (i/2)|0);
+        let lineObject = getNewEdge(vertex1, vertex2, (i / 2) | 0);
 
         edges.add(lineObject);
     }
-    edges.visible = false;
     containerGroup.add(edges);
 
     let faces = new THREE.Group();
@@ -266,13 +353,15 @@ function addCube(dim = 250) {
         let edge4 = edges.children[index4];
         let edgeList = [edge1, edge2, edge3, edge4];
 
-        let faceObject = getNewFace(edgeList, (i/4)|0);
+        // let faceObject = getNewFace(edgeList, (i / 4) | 0);
 
-        faces.add(faceObject);
+        // faces.add(faceObject);
     }
     containerGroup.add(faces);
     // console.log(faces);
 
+    vertices.visible = true;
+    edges.visible = true;
 
     containerGroup.translateX(125);
     containerGroup.translateY(125);
@@ -723,57 +812,62 @@ function getFaceGeometry(faceObject, offset = 0) {
 function updateVertex(vertex, new_position) {
     vertex.userData.position.copy(new_position);
     vertex.position.copy(new_position);
-
     vertex.userData.mathObject.copy(vertex.position);
-    for (let line of vertex.userData.linesStart.concat(vertex.userData.linesEnd)) {
-        if (line.userData.locked) continue;
 
-        let point1 = line.userData.mathObject.start;
-        let point2 = line.userData.mathObject.end;
-        let midPoint = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
-        let startPoint = point1.clone().sub(midPoint);
-        let endPoint = point2.clone().sub(midPoint);
+    for (let refSource of ["edgeStartRefers", "edgeEndRefers"]) {
+        for (let ref = vertex.userData[refSource]; ref !== undefined; ref = ref.next) {
+            let edge = ref.edge;
+            if (edge.userData.locked) continue;
 
-        line.position.copy(midPoint);
-        line.userData.position.copy(midPoint);
-        let linePosition = line.geometry.getAttribute("position");
-        linePosition.setXYZ(0, startPoint.x, startPoint.y, startPoint.z);
-        linePosition.setXYZ(1, endPoint.x, endPoint.y, endPoint.z);
+            let point1 = edge.userData.mathObject.start;
+            let point2 = edge.userData.mathObject.end;
+            let midPoint = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
+            let startPoint = point1.clone().sub(midPoint);
+            let endPoint = point2.clone().sub(midPoint);
 
-        linePosition.needsUpdate = true;
+            edge.position.copy(midPoint);
+            edge.userData.position.copy(midPoint);
+
+            let linePosition = edge.geometry.getAttribute("position");
+            linePosition.setXYZ(0, startPoint.x, startPoint.y, startPoint.z);
+            linePosition.setXYZ(1, endPoint.x, endPoint.y, endPoint.z);
+
+            linePosition.needsUpdate = true;
+        }
     }
 
-    for (let triangleGroup of vertex.userData.triangleRefers) {
-        if (triangleGroup.triangle.face.userData.locked) continue;
 
-        let triangle = triangleGroup.triangle;
-        let triangleIndex = triangleGroup.index;
-        let point1 = triangle.points[0].userData.mathObject;
-        let point2 = triangle.points[1].userData.mathObject;
-        let point3 = triangle.points[2].userData.mathObject;
+    for (let ref = vertex.userData.triangleRefers;ref !== undefined; ref = ref.next) {
+        if (ref.triangle.face.userData.locked) continue;
 
-        let point;
-        if (triangleIndex === 0) point = point1;
-        else if (triangleIndex === 1) point = point2;
-        else point = point3;
-
-        point = point.clone().sub(triangle.face.position);
-
-        let facePosition = triangle.face.geometry.getAttribute("position");
-        facePosition.setXYZ(triangleIndex + triangle.index * 3, point.x, point.y, point.z);
-        facePosition.needsUpdate = true;
-
-        let normal = triangle.normal;
-        triangle.face.userData.runningAverageNormal.sub(normal);
-        normal.subVectors(point3, point2).cross(new Vector3().subVectors(point1, point2));
-        triangle.face.userData.runningAverageNormal.add(normal);
-        let normalized = normal.clone().normalize();
-
-        let faceNormal = triangle.face.geometry.getAttribute("normal");
-        faceNormal.setXYZ(triangle.index * 3, normalized.x, normalized.y, normalized.z);
-        faceNormal.setXYZ(triangle.index * 3 + 1, normalized.x, normalized.y, normalized.z);
-        faceNormal.setXYZ(triangle.index * 3 + 2, normalized.x, normalized.y, normalized.z);
-        faceNormal.needsUpdate = true; // todo remove comment; ahahahahaha, now I learned what needsUpdate means
+        //
+        // let triangleIndex = triangleGroup.index;
+        // let point1 = triangle.points[0].userData.mathObject;
+        // let point2 = triangle.points[1].userData.mathObject;
+        // let point3 = triangle.points[2].userData.mathObject;
+        //
+        // let point;
+        // if (triangleIndex === 0) point = point1;
+        // else if (triangleIndex === 1) point = point2;
+        // else point = point3;
+        //
+        // point = point.clone().sub(triangle.face.position);
+        //
+        // let facePosition = triangle.face.geometry.getAttribute("position");
+        // facePosition.setXYZ(triangleIndex + triangle.index * 3, point.x, point.y, point.z);
+        // facePosition.needsUpdate = true;
+        //
+        // let normal = triangle.normal;
+        // triangle.face.userData.runningAverageNormal.sub(normal);
+        // normal.subVectors(point3, point2).cross(new Vector3().subVectors(point1, point2));
+        // triangle.face.userData.runningAverageNormal.add(normal);
+        // let normalized = normal.clone().normalize();
+        //
+        // let faceNormal = triangle.face.geometry.getAttribute("normal");
+        // faceNormal.setXYZ(triangle.index * 3, normalized.x, normalized.y, normalized.z);
+        // faceNormal.setXYZ(triangle.index * 3 + 1, normalized.x, normalized.y, normalized.z);
+        // faceNormal.setXYZ(triangle.index * 3 + 2, normalized.x, normalized.y, normalized.z);
+        // faceNormal.needsUpdate = true; // todo remove comment; ahahahahaha, now I learned what needsUpdate means
     }
 }
 
@@ -781,11 +875,12 @@ function updateEdge(edge, new_position) {
     edge.position.copy(new_position);
     edge.userData.locked = true;
     let translation = edge.position.clone().sub(edge.userData.position);
-    updateVertex(edge.userData.startPoint, edge.userData.mathObject.start.clone().add(translation));
-    updateVertex(edge.userData.endPoint, edge.userData.mathObject.end.clone().add(translation));
+    let edgeStart = edge.userData.edgeStart.vertex;
+    updateVertex(edgeStart, edgeStart.position.add(translation));
+    let edgeEnd = edge.userData.edgeEnd.vertex;
+    updateVertex(edgeEnd, edgeEnd.position.add(translation));
     edge.userData.locked = false;
     edge.userData.position.copy(edge.position);
-    edge.matrixWorldAutoUpdate = true;
 }
 
 function updateFace(face, new_position) {

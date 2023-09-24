@@ -78,7 +78,7 @@ function Toolbar( signals ) {
 	} );
 	container.add( editPoints );
 
-	const editLines = new UICheckbox( false );
+	const editLines = new UICheckbox( true );
 	editLines.dom.title = strings[ 'toolbar/editLines' ];
 	editLines.onChange( function () {
 		signals.editLinesChanged.dispatch( this.getValue() );
