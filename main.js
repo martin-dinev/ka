@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {Points, Vector3} from 'three';
+import {Points} from 'three';
 import WebGL from 'three/addons/capabilities/WebGL.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GUI} from "three/addons/libs/lil-gui.module.min";
@@ -25,10 +25,21 @@ const onUpPosition = new THREE.Vector2();
 const onDoubleClickPosition = new THREE.Vector2();
 
 
+function removeObject(object) {
+    if (object === undefined) return;
+    if (selection !== undefined && object === selection.object) select({object: getParent(object)});
+    if (isObjectLine(object)) removeEdge(object);
+    else if (isObjectPoint(object)) removeVertex(object);
+    else if (isObjectFace(object)) removeFace(object);
+    else console.error("object is not a point, line or face", object);
+    render();
+}
+
 const params = {
     number: 10,
     addCube: addCube,
     subdivide: () => subdivide(selection ? selection.object : undefined),
+    removeObject: () => removeObject(selection ? selection.object : undefined),
     export: () => {
         console.log("wait");
     },
@@ -148,6 +159,17 @@ function addDoubleRef(first, second, firstName, secondName, firstStart, secondSt
     }
 }
 
+function removeDoubleRef(reference, firstName, secondName, firstStart, secondStart) {
+    let first = reference[firstName];
+    let second = reference[secondName];
+    if (reference[firstName + "Prev"] === undefined) first.userData[firstStart] = reference[firstName + "Next"];
+    else reference[firstName + "Prev"][firstName + "Next"] = reference[firstName + "Next"];
+    if (reference[firstName + "Next"] !== undefined) reference[firstName + "Next"][firstName + "Prev"] = reference[firstName + "Prev"];
+    if (reference[secondName + "Prev"] === undefined) second.userData[secondStart] = reference[secondName + "Next"];
+    else reference[secondName + "Prev"][secondName + "Next"] = reference[secondName + "Next"];
+    if (reference[secondName + "Next"] !== undefined) reference[secondName + "Next"][secondName + "Prev"] = reference[secondName + "Prev"];
+}
+
 /*
 
 function addVertexLineStartRef(vertex, line) {
@@ -214,7 +236,8 @@ function getNewVertex(verticesPosition1, verticesPosition2, verticesPosition3) {
     pointObject.userData.mathObject = point;
     pointObject.userData.edgeStartRefers = undefined;
     pointObject.userData.edgeEndRefers = undefined;
-    pointObject.userData.triangleRefers = undefined;
+    pointObject.userData.faceVertexRefers = {}; // todo me is sad about this; remove comment
+    pointObject.userData.triangleRefers = [];
     pointObject.userData.position = point.clone();
     pointObject.userData.locked = false;
     pointObject.userData.locker = undefined;
@@ -243,6 +266,7 @@ function getNewEdge(vertex1, vertex2) {
 
     edgeObject.userData.mathObject = line;
     edgeObject.userData.position = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
+    edgeObject.userData.triangleRefers = [];
     edgeObject.userData.locked = false;
     edgeObject.userData.locker = undefined;
 
@@ -266,24 +290,25 @@ function getNewFace(edgeList) {
     let edgeCount = edgeList.length;
 
     faceObject.userData.edges = undefined;
+    faceObject.userData.position = new THREE.Vector3();
     for (let i = edgeList.length - 1; i >= 0; i--) {
-        addRef(edgeList[i], faceObject, "edge", "face", "faceRefers", "edges");
+        addDoubleRef(edgeList[i], faceObject, "edge", "face", "faceRefers", "edges"); // todo remove comment, I've been debuging the wrong call....
+        // console.log(faceObject.userData.edges);
+        faceObject.userData.position.add(edgeList[i].userData.position);
+        console.log(edgeList[i].userData.position);
     }
+    console.log("");
+    faceObject.userData.position.divideScalar(edgeCount);
+    faceObject.position.copy(faceObject.userData.position);
 
     faceObject.userData.edgeCount = edgeCount;
-    // faceObject.userData.pointsSum = new THREE.Vector3(0, 0, 0);
-    // faceObject.userData.normalsSum = new THREE.Vector3(0, 0, 0);
-    // faceObject.userData.position = new THREE.Vector3(0, 0, 0);
-    // for(let edge of edgeList){
-    //     faceObject.userData.pointsSum.add(edge.position);
-    // }
-
+    faceObject.userData.triangleRefers = [];
 
     faceObject.userData.locked = false;
     faceObject.userData.locker = undefined;
 
 
-    // getFaceGeometry(faceObject);
+    calculateFaceGeometry(faceObject);
 
     faceObject.material = new THREE.MeshNormalMaterial({
         // color: Math.random() * 0xffffff,
@@ -295,12 +320,12 @@ function getNewFace(edgeList) {
 
 function addCube(dim = 250) {
     let containerGroup = new THREE.Group();
-    containerGroup.userData.groupClass = "container";
+    containerGroup.name = "customObject";
 
     let dimHalf = dim / 2;
 
     let vertices = new THREE.Group();
-    vertices.userData.groupClass = "vertices";
+    vertices.name = "vertices";
     let verticesPositions = new Float32Array([
         -dimHalf, -dimHalf, -dimHalf,
         -dimHalf, -dimHalf, dimHalf,
@@ -317,7 +342,7 @@ function addCube(dim = 250) {
     containerGroup.add(vertices);
 
     let edges = new THREE.Group();
-    edges.userData.groupClass = "edges";
+    edges.name = "edges";
     let edgesIndices = new Uint16Array([
         0, 1, 0, 2, 0, 4, 1, 3, 1, 5, 2, 3, 2, 6, 4, 5, 4, 6, 3, 7, 5, 7, 6, 7
         // 0     1     2     3     4     5     6     7     8     9    10    11
@@ -332,7 +357,7 @@ function addCube(dim = 250) {
     containerGroup.add(edges);
 
     let faces = new THREE.Group();
-    faces.userData.groupClass = "faces";
+    faces.name = "faces";
     let faceIndices = new Uint16Array([
         0, 3, 5, 1,
         0, 2, 7, 4,
@@ -350,6 +375,8 @@ function addCube(dim = 250) {
         let edge3 = edges.children[index3];
         let edge4 = edges.children[index4];
         let edgeList = [edge1, edge2, edge3, edge4];
+
+        edgeList = [edge1, edge2, edge3, edge4];
 
         addToContainer(faces, getNewFace(edgeList));
     }
@@ -386,6 +413,7 @@ function addGui() {
     gui.add(params, 'number');
     gui.add(params, 'addCube');
     gui.add(params, 'subdivide');
+    gui.add(params, 'removeObject').name("remove selection");
     gui.add(params, 'export');
 }
 
@@ -513,13 +541,13 @@ function addTransformControls() {
     transformControls.addEventListener('change', function () {
         const object = transformControls.object;
         if (object !== undefined) {
-            if (showEditPoints && isSelectedPoint(object)) {
+            if (showEditPoints && isObjectPoint(object)) {
                 /*console.log("moving point", object);*/
                 updateVertex(object, object.position);
-            } else if (showEditLines && isSelectedLine(object)) {
+            } else if (showEditLines && isObjectLine(object)) {
                 /*console.log("moving line", object);*/
                 updateEdge(object, object.position);
-            } else if (showEditFaces && allowEditFaces && isSelectedFace(object)) {
+            } else if (showEditFaces && allowEditFaces && isObjectFace(object)) {
                 /*console.log("moving face");*/
                 updateFace(object, object.position);
             }
@@ -603,11 +631,11 @@ function rayCasting() {
                     child.visible = false;
                 }
             });
-            if (showEditPoints && isSelectedPoint(selection.object)) {
+            if (showEditPoints && isObjectPoint(selection.object)) {
                 transformControls.attach(selection.object);
-            } else if (showEditLines && isSelectedLine(selection.object)) {
+            } else if (showEditLines && isObjectLine(selection.object)) {
                 transformControls.attach(selection.object);
-            } else if (showEditFaces && allowEditFaces && isSelectedFace(selection.object)) {
+            } else if (showEditFaces && allowEditFaces && isObjectFace(selection.object)) {
                 transformControls.attach(selection.object);
             } else {
                 transformControls.attach(getParent(selection.object));
@@ -617,12 +645,6 @@ function rayCasting() {
     });
 }
 
-function getParent(object) {
-    while (object.parent !== objectsGroup) {
-        object = object.parent
-    }
-    return object
-}
 
 function getIntersects(point) {
     mouse.set((point.x * 2) - 1, -(point.y * 2) + 1);
@@ -664,15 +686,21 @@ function onMouseUp(event) {
     document.removeEventListener('mouseup', onMouseUp);
 }
 
-function isSelectedPoint(object) {
+
+function getParent(object) {
+    while (object.name !== "customObject") object = object.parent;
+    return object;
+}
+
+function isObjectPoint(object) {
     return object instanceof THREE.Points;
 }
 
-function isSelectedLine(object) { // todo refactor these three with parent group class
+function isObjectLine(object) { // todo refactor these three with parent group class
     return object instanceof THREE.Line;
 }
 
-function isSelectedFace(object) {
+function isObjectFace(object) {
     return object instanceof THREE.Mesh;
 }
 
@@ -692,123 +720,325 @@ function getMousePosition(dom, x, y) {
     return [(x - rect.left) / rect.width, (y - rect.top) / rect.height];
 }
 
-function getFaceGeometry(faceObject, offset = 0) {
-    let triangleCount = faceObject.userData.edgeCount - 2;
 
-    let firstEdge = faceObject.userData.mathObject;
-    for (let i = 0; i < offset; i++) firstEdge = firstEdge.next;
+function addFaceVertex(face, vertex) {
+    let geometry = face.geometry;
+    let positionAttribute = geometry.getAttribute("position");
+    let normalAttribute = geometry.getAttribute("normal");
 
-    let edges = [firstEdge];
-    while (edges[edges.length - 1].next !== firstEdge) edges.push(edges[edges.length - 1].next);
+    let tr_vertex = vertex.userData.position.clone().sub(face.userData.position)
+    let ind = positionAttribute.freeIndex++;
+    normalAttribute.freeIndex++;
 
-    let points = [];
-    for (let edge of edges) {
-        if (edge.dir) points.push(edge.edge.userData.startPoint);
-        else points.push(edge.edge.userData.endPoint);
+    if (ind === 0) normalAttribute.setXYZ(ind, 0, 0, 0);
+    else normalAttribute.setXYZ(ind, normalAttribute.getX(0), normalAttribute.getY(0), normalAttribute.getZ(0));
+
+    positionAttribute.setXYZ(ind, tr_vertex.x, tr_vertex.y, tr_vertex.z);
+
+    let inversePositionAttribute = face.userData.inversePosition;
+    inversePositionAttribute[ind] = {
+        face: face,
+        ind: ind,
+        vertex: vertex,
+    };
+    vertex.userData.faceVertexRefers[face.uuid] = inversePositionAttribute[ind];
+}
+
+function updateFaceNormal(face) {
+    let geometry = face.geometry;
+    let indexAttribute = geometry.index;
+    let inverseIndexAttribute = face.userData.inverseIndex;
+
+    let normal = new THREE.Vector3();
+    for (let i = 0; i < indexAttribute.freeIndex; i++) {
+        let triangle = inverseIndexAttribute[i];
+        normal.add(triangle.normal);
     }
+    normal.normalize();
 
-    faceObject.userData.runningAveragePoints.set(0, 0, 0);
-    for (let point of points) {
-        faceObject.userData.runningAveragePoints.add(point.userData.mathObject);
+    let normalAttribute = geometry.getAttribute("normal");
+    for (let i = 0; i < normalAttribute.freeIndex; i++) {
+        normalAttribute.setXYZ(i, normal.x, normal.y, normal.z);
     }
-    faceObject.position.copy(faceObject.userData.runningAveragePoints.clone().divideScalar(points.length));
-    faceObject.userData.position.copy(faceObject.position);
+    normalAttribute.needsUpdate = true;
+}
 
-    let geometry = faceObject.geometry;
+function updateTriangleNormal(triangle, face) {
+    let geometry = face.geometry;
+    let positionAttribute = geometry.getAttribute("position");
+    let indexAttribute = geometry.index;
+    let index1 = indexAttribute.getX(triangle.ind);
+    let index2 = indexAttribute.getY(triangle.ind);
+    let index3 = indexAttribute.getZ(triangle.ind);
+    let vertex1 = new THREE.Vector3(positionAttribute.getX(index1), positionAttribute.getY(index1), positionAttribute.getZ(index1));
+    let vertex2 = new THREE.Vector3(positionAttribute.getX(index2), positionAttribute.getY(index2), positionAttribute.getZ(index2));
+    let vertex3 = new THREE.Vector3(positionAttribute.getX(index3), positionAttribute.getY(index3), positionAttribute.getZ(index3));
+    triangle.normal = new THREE.Vector3().crossVectors(vertex2.clone().sub(vertex1), vertex3.clone().sub(vertex1)).normalize();
+}
+
+function addTriangle(face, edge, edgeDirection, vertex, updateNormal = true) {
+    let geometry = face.geometry;
+    let indexAttribute = geometry.index;
+
+    let edgeStartPosIndex = edge.userData.edgeStart.vertex.userData.faceVertexRefers[face.uuid].ind;
+    let edgeEndPosIndex = edge.userData.edgeEnd.vertex.userData.faceVertexRefers[face.uuid].ind;
+    let vertexPosIndex = vertex.userData.faceVertexRefers[face.uuid].ind;
+
+    let ind = indexAttribute.freeIndex++;
+    if (edgeDirection) indexAttribute.setXYZ(ind, edgeStartPosIndex, edgeEndPosIndex, vertexPosIndex);
+    else indexAttribute.setXYZ(ind, edgeEndPosIndex, edgeStartPosIndex, vertexPosIndex);
+
+    let inverseIndexAttribute = face.userData.inverseIndex;
+    let triangle = {
+        ind: ind,
+        edgeDirection: edgeDirection,
+        normal: new THREE.Vector3(),
+    };
+
+    updateTriangleNormal(triangle, face);
+
+    let triangleRef = {
+        face: face,
+        faceInd: face.userData.triangleRefers.length,
+        edge: edge,
+        edgeInd: edge.userData.triangleRefers.length,
+        vertex: vertex,
+        vertexInd: vertex.userData.triangleRefers.length,
+        triangle: triangle,
+        triangleInd: ind,
+    };
+    inverseIndexAttribute[ind] = triangle;
+    face.userData.triangleRefers.push(triangleRef);
+    edge.userData.triangleRefers.push(triangleRef);
+    vertex.userData.triangleRefers.push(triangleRef);
+
+    if (updateNormal) updateFaceNormal(face);
+}
+
+function calculateFaceGeometry(face) {
+    let edgeCount = face.userData.edgeCount;
+    let triangleCount = edgeCount - 2;
+    let pointCount = face.userData.edgeCount;
+    const redundancy = 3;
+
+    let geometry = face.geometry;
     if (geometry === undefined) {
         geometry = new THREE.BufferGeometry();
-        faceObject.geometry = geometry;
+        face.geometry = geometry;
     }
-    geometry.setDrawRange(0, 3 * 3 * triangleCount);
-
-    const redundancy = 3;
-    let arraySize = 3 * 3 * triangleCount * redundancy;
+    geometry.setDrawRange(0, 3 * triangleCount);
 
 
     let positionAttribute = geometry.getAttribute('position');
-    if (positionAttribute === undefined || positionAttribute.array.length < arraySize) {
+    if (positionAttribute === undefined || positionAttribute.array.length < 3 * pointCount * redundancy) {
         if (positionAttribute !== undefined) positionAttribute.dispose();
-        positionAttribute = new THREE.BufferAttribute(new Float32Array(arraySize), 3);
+        positionAttribute = new THREE.Float32BufferAttribute(new Float32Array(3 * pointCount * redundancy), 3);
         geometry.setAttribute('position', positionAttribute);
     }
+    positionAttribute.freeIndex = 0;
 
-    const cb = new Vector3(), ab = new Vector3();
-    faceObject.userData.triangleRefers.length = 0; // todo undo references
-    for (let i = 0; i < triangleCount; i++) {
-        let topIndex = (i + 1) / 2 | 0;
-        let bottomIndex = points.length - 1 - (i / 2 | 0);
-        let triangle = {index: i, face: faceObject, points: [], edges: [], normal: new Vector3()};
-        faceObject.userData.triangleRefers.push(triangle);
-        if (i === points.length - 3 && points.length % 2 === 0) {
-            triangle.edges.push(edges[topIndex]);
-        }
-        if (i % 2 === 0) {
-            triangle.points = [points[topIndex], points[topIndex + 1], points[bottomIndex]];
-            triangle.edges.push(edges[topIndex]);
-        } else {
-            triangle.points = [points[topIndex], points[bottomIndex - 1], points[bottomIndex]];
-            triangle.edges.push(edges[bottomIndex - 1]);
-        }
-        if (i === points.length - 3 && points.length % 2 === 1) {
-            triangle.edges.push(edges[topIndex + 1]);
-        }
-        if (i === 0) triangle.edges.push(edges[bottomIndex]);
-
-        for (let j = 0; j < triangle.edges.length; j++) {
-            let edge = triangle.edges[j];
-            edge.edge.userData.triangleRefers.push({index: j, triangle: triangle});
-        }
-
-        for (let j = 0; j < triangle.points.length; j++) {
-            let point = triangle.points[j];
-            point.userData.triangleRefers.push({index: j, triangle: triangle});
-            let pointPosition = point.userData.mathObject.clone().sub(faceObject.position);
-            positionAttribute.setXYZ(i * 3 + j, pointPosition.x, pointPosition.y, pointPosition.z);
-        }
-        let pA = triangle.points[0].userData.mathObject;
-        let pB = triangle.points[1].userData.mathObject;
-        let pC = triangle.points[2].userData.mathObject;
-        cb.subVectors(pC, pB);
-        ab.subVectors(pA, pB);
-        cb.cross(ab);
-        triangle.normal.copy(cb);
+    let normalAttribute = geometry.getAttribute('normal');
+    if (normalAttribute === undefined || normalAttribute.array.length < 3 * pointCount * redundancy) {
+        if (normalAttribute !== undefined) normalAttribute.dispose();
+        normalAttribute = new THREE.Float32BufferAttribute(new Float32Array(3 * pointCount * redundancy), 3);
+        geometry.setAttribute('normal', normalAttribute);
     }
+    normalAttribute.freeIndex = positionAttribute.freeIndex;
+
+
+    let inversePositionAttribute = face.userData.inversePosition;
+    if (!inversePositionAttribute) inversePositionAttribute = undefined;
+    if (inversePositionAttribute === undefined || inversePositionAttribute.length < pointCount * redundancy) {
+        if (inversePositionAttribute !== undefined) {
+            //todo figure out if there is a dispose method
+        }
+        // inversePositionAttribute = {
+        //     array: new Array(pointCount * redundancy),
+        //     count: 0,
+        //     add: function (vertex) {
+        //         this.array[this.count++] = vertex;
+        //     }
+        // };
+        inversePositionAttribute = new Array(pointCount * redundancy);
+        face.userData.inversePosition = inversePositionAttribute;
+    }
+
+    let indexAttribute = geometry.index ? geometry.index : undefined;
+    if (indexAttribute === undefined || indexAttribute.array.length < 3 * triangleCount * redundancy) {
+        if (indexAttribute !== undefined) indexAttribute.dispose();
+        indexAttribute = new THREE.Uint16BufferAttribute(new Uint16Array(3 * triangleCount * redundancy), 3);//todo don't forget you're using item size 3
+        geometry.index = indexAttribute;
+    }
+    indexAttribute.freeIndex = 0;
+
+    let inverseIndexAttribute = face.userData.inverseIndex;
+    if (!inverseIndexAttribute) inverseIndexAttribute = undefined;
+    if (inverseIndexAttribute === undefined || inverseIndexAttribute.length < triangleCount * redundancy) {
+        if (inverseIndexAttribute !== undefined) {
+            //todo figure out if there is a dispose method
+        }
+        inverseIndexAttribute = new Array(triangleCount * redundancy);
+        face.userData.inverseIndex = inverseIndexAttribute;
+    }
+
+    let edges = new Array(edgeCount);
+    for (let edgeRefer = face.userData.edges, i = 0; edgeRefer !== undefined; edgeRefer = edgeRefer["faceNext"], i++) {
+        edges[i] = edgeRefer.edge;
+    }
+    let directions = new Array(edgeCount);
+    for (let i = 0; i < edgeCount; i++) {
+        let nextEdge = i + 1 < edges.length ? edges[i + 1] : undefined;
+        let prevEdge = i - 1 >= 0 ? edges[i - 1] : undefined;
+        let dir = false;
+        if (prevEdge) {
+            let points = [prevEdge.userData.edgeStart.vertex, prevEdge.userData.edgeEnd.vertex];
+            if (points.includes(edges[i].userData.edgeStart.vertex)) {
+                dir = true;
+            }
+        } else {
+            let points = [nextEdge.userData.edgeStart.vertex, nextEdge.userData.edgeEnd.vertex];
+            if (points.includes(edges[i].userData.edgeEnd.vertex)) {
+                dir = true;
+            }
+        }
+        directions[i] = dir;
+    }
+
+    console.log(directions);
+
+    let vertices = new Array(pointCount);
+    for (let i = 0; i < pointCount; i++) {
+        let dir = directions[i];
+        if (dir) vertices[i] = edges[i].userData.edgeStart.vertex;
+        else vertices[i] = edges[i].userData.edgeEnd.vertex;
+        addFaceVertex(face, vertices[i]);
+    }
+    console.log(edges.map(e => [e.userData.edgeStart.vertex.position, e.userData.edgeEnd.vertex.position]));
+    console.log(vertices.map(v => v.position));
+    console.log(face);
+
+    for (let i = 0; i < triangleCount; i++) {
+        let topEdge = edges[((i / 2) | 0)];
+        let bottomEdge = edges[edges.length - 2 - ((i / 2) | 0)];
+        let edge = (i % 2 === 0) ? topEdge : bottomEdge;
+        let edgeDirection = directions[((i / 2) | 0)];
+        if (i % 2 === 1) edgeDirection = directions[edges.length - 2 - ((i / 2) | 0)];
+        let topVertex = vertices[(((i + 1) / 2) | 0)];
+        let bottomVertex = vertices[vertices.length - 1 - (((i + 1) / 2) | 0)];
+        let vertex = (i % 2 === 0) ? bottomVertex : topVertex;
+
+        console.log(edge.userData.edgeStart.vertex.position, edge.userData.edgeEnd.vertex.position, vertex.position);
+
+        addTriangle(face, edge, edgeDirection, vertex, true); //todo updnorm set to false
+    }
+
+    geometry.getAttribute('position').needsUpdate = true;
+    geometry.getAttribute('normal').needsUpdate = true;
+    geometry.index.needsUpdate = true;
+    geometry.needsUpdate;
+    geometry.matrixWorldNeedsUpdate;
+
+    // console.log(geometry);
+
+
+    // for (let i = 0; i < triangleCount; i++) {
+    //     let topIndex = (i + 1) / 2 | 0;
+    //     let bottomIndex = points.length - 1 - (i / 2 | 0);
+    //     let triangle = {index: i, face: faceObject, points: [], edges: [], normal: new Vector3()};
+    //     faceObject.userData.triangleRefers.push(triangle);
+    //     if (i === points.length - 3 && points.length % 2 === 0) {
+    //         triangle.edges.push(edges[topIndex]);
+    //     }
+    //     if (i % 2 === 0) {
+    //         triangle.points = [points[topIndex], points[topIndex + 1], points[bottomIndex]];
+    //         triangle.edges.push(edges[topIndex]);
+    //     } else {
+    //         triangle.points = [points[topIndex], points[bottomIndex - 1], points[bottomIndex]];
+    //         triangle.edges.push(edges[bottomIndex - 1]);
+    //     }
+    //     if (i === points.length - 3 && points.length % 2 === 1) {
+    //         triangle.edges.push(edges[topIndex + 1]);
+    //     }
+    //     if (i === 0) triangle.edges.push(edges[bottomIndex]);
+    //
+    //     for (let j = 0; j < triangle.edges.length; j++) {
+    //         let edge = triangle.edges[j];
+    //         edge.edge.userData.triangleRefers.push({index: j, triangle: triangle});
+    //     }
+    //
+    //     for (let j = 0; j < triangle.points.length; j++) {
+    //         let point = triangle.points[j];
+    //         point.userData.triangleRefers.push({index: j, triangle: triangle});
+    //         let pointPosition = point.userData.mathObject.clone().sub(faceObject.position);
+    //         positionAttribute.setXYZ(i * 3 + j, pointPosition.x, pointPosition.y, pointPosition.z);
+    //     }
+    //     let pA = triangle.points[0].userData.mathObject;
+    //     let pB = triangle.points[1].userData.mathObject;
+    //     let pC = triangle.points[2].userData.mathObject;
+    //     cb.subVectors(pC, pB);
+    //     ab.subVectors(pA, pB);
+    //     cb.cross(ab);
+    //     triangle.normal.copy(cb);
+    // }
     positionAttribute.needsUpdate = true;
 
     // geometry.computeVertexNormals();
 
-    let normalAttribute = geometry.getAttribute('normal');
-    if (normalAttribute === undefined || normalAttribute.array.length < arraySize) {
-        if (normalAttribute !== undefined) normalAttribute.dispose();
-        normalAttribute = new THREE.BufferAttribute(new Float32Array(arraySize), 3);
-        geometry.setAttribute('normal', normalAttribute);
-    }
-
-    faceObject.userData.runningAverageNormal.set(0, 0, 0);
-
-    for (let i = 0; i < triangleCount; i++) {
-        let triangle = faceObject.userData.triangleRefers[i];
-        let normal = triangle.normal;
-        faceObject.userData.runningAverageNormal.add(normal);
-        normalAttribute.setXYZ(i * 3 + 0, normal.x, normal.y, normal.z);
-        normalAttribute.setXYZ(i * 3 + 1, normal.x, normal.y, normal.z);
-        normalAttribute.setXYZ(i * 3 + 2, normal.x, normal.y, normal.z);
-    }
-
-    const globalNormal = false; // todo se zafrknav :( trebashe da e true, ama updates kje se poteshki taka
-    if (globalNormal)
-        for (let i = 0; i < triangleCount * 3; i++) {
-            normalAttribute.setXYZ(i, faceObject.userData.runningAverageNormal.x, faceObject.userData.runningAverageNormal.y, faceObject.userData.runningAverageNormal.z);
-        }
-
-    normalAttribute.needsUpdate = true;
-    geometry.normalizeNormals();
+    // let normalAttribute = geometry.getAttribute('normal');
+    // if (normalAttribute === undefined || normalAttribute.array.length < arraySize) {
+    //     if (normalAttribute !== undefined) normalAttribute.dispose();
+    //     normalAttribute = new THREE.BufferAttribute(new Float32Array(arraySize), 3);
+    //     geometry.setAttribute('normal', normalAttribute);
+    // }
+    //
+    // faceObject.userData.runningAverageNormal.set(0, 0, 0);
+    //
+    // for (let i = 0; i < triangleCount; i++) {
+    //     let triangle = faceObject.userData.triangleRefers[i];
+    //     let normal = triangle.normal;
+    //     faceObject.userData.runningAverageNormal.add(normal);
+    //     normalAttribute.setXYZ(i * 3 + 0, normal.x, normal.y, normal.z);
+    //     normalAttribute.setXYZ(i * 3 + 1, normal.x, normal.y, normal.z);
+    //     normalAttribute.setXYZ(i * 3 + 2, normal.x, normal.y, normal.z);
+    // }
+    //
+    // const globalNormal = false; // todo se zafrknav :( trebashe da e true, ama updates kje se poteshki taka
+    // if (globalNormal)
+    //     for (let i = 0; i < triangleCount * 3; i++) {
+    //         normalAttribute.setXYZ(i, faceObject.userData.runningAverageNormal.x, faceObject.userData.runningAverageNormal.y, faceObject.userData.runningAverageNormal.z);
+    //     }
+    //
+    // normalAttribute.needsUpdate = true;
+    // geometry.normalizeNormals();
 }
 
 function updateVertex(vertex, new_position) {
     vertex.userData.position.copy(new_position);
     vertex.position.copy(new_position);
     vertex.userData.mathObject.copy(vertex.position);
+
+
+    for (let ref of vertex.userData.triangleRefers) {
+        let face = ref.face;
+        if (face.userData.locked) continue;
+        let triangle = ref.triangle;
+
+        let geometry = face.geometry;
+
+        let positionAttribute = geometry.getAttribute("position");
+        let indexAttribute = geometry.index;
+
+        let newPoint = new_position.clone().sub(face.position);
+
+        let indexInd = triangle.ind;
+        let vertexPositionInd = indexAttribute.getZ(indexInd);
+        positionAttribute.setXYZ(vertexPositionInd, newPoint.x, newPoint.y, newPoint.z);
+        positionAttribute.needsUpdate = true;
+
+        updateTriangleNormal(triangle, face);
+        updateFaceNormal(face); // todo replace with optimized running average (bellow too)
+    }
+
 
     for (let refSource of ["edgeStartRefers", "edgeEndRefers"]) {
         for (let ref = vertex.userData[refSource]; ref !== undefined; ref = ref.next) {
@@ -829,42 +1059,43 @@ function updateVertex(vertex, new_position) {
             linePosition.setXYZ(1, endPoint.x, endPoint.y, endPoint.z);
 
             linePosition.needsUpdate = true;
+
+
+            for (let ref of edge.userData.triangleRefers) {
+                let face = ref.face;
+                if (face.userData.locked) continue;
+                let triangle = ref.triangle;
+
+                let geometry = face.geometry;
+
+                let positionAttribute = geometry.getAttribute("position");
+                let indexAttribute = geometry.index;
+
+                let newPoint = new_position.clone().sub(face.position);
+
+                let indexInd = triangle.ind;
+                let vertexPositionInd;
+                if (refSource === "edgeStartRefers") {
+                    if (triangle.edgeDirection) vertexPositionInd = indexAttribute.getX(indexInd);
+                    else vertexPositionInd = indexAttribute.getY(indexInd);
+                } else {
+                    if (triangle.edgeDirection) vertexPositionInd = indexAttribute.getY(indexInd);
+                    else vertexPositionInd = indexAttribute.getX(indexInd);
+                }
+
+
+                positionAttribute.setXYZ(vertexPositionInd, newPoint.x, newPoint.y, newPoint.z);
+                positionAttribute.needsUpdate = true;
+
+                updateTriangleNormal(triangle, face);
+                updateFaceNormal(face); // todo replace with optimized running average (bellow too)
+
+            }
+
         }
     }
 
 
-    for (let ref = vertex.userData.triangleRefers; ref !== undefined; ref = ref.next) {
-        if (ref.triangle.face.userData.locked) continue;
-
-        //
-        // let triangleIndex = triangleGroup.index;
-        // let point1 = triangle.points[0].userData.mathObject;
-        // let point2 = triangle.points[1].userData.mathObject;
-        // let point3 = triangle.points[2].userData.mathObject;
-        //
-        // let point;
-        // if (triangleIndex === 0) point = point1;
-        // else if (triangleIndex === 1) point = point2;
-        // else point = point3;
-        //
-        // point = point.clone().sub(triangle.face.position);
-        //
-        // let facePosition = triangle.face.geometry.getAttribute("position");
-        // facePosition.setXYZ(triangleIndex + triangle.index * 3, point.x, point.y, point.z);
-        // facePosition.needsUpdate = true;
-        //
-        // let normal = triangle.normal;
-        // triangle.face.userData.runningAverageNormal.sub(normal);
-        // normal.subVectors(point3, point2).cross(new Vector3().subVectors(point1, point2));
-        // triangle.face.userData.runningAverageNormal.add(normal);
-        // let normalized = normal.clone().normalize();
-        //
-        // let faceNormal = triangle.face.geometry.getAttribute("normal");
-        // faceNormal.setXYZ(triangle.index * 3, normalized.x, normalized.y, normalized.z);
-        // faceNormal.setXYZ(triangle.index * 3 + 1, normalized.x, normalized.y, normalized.z);
-        // faceNormal.setXYZ(triangle.index * 3 + 2, normalized.x, normalized.y, normalized.z);
-        // faceNormal.needsUpdate = true; // todo remove comment; ahahahahaha, now I learned what needsUpdate means
-    }
 }
 
 function updateEdge(edge, new_position) {
@@ -902,14 +1133,46 @@ function updateFace(face, new_position) {
     face.userData.position.copy(face.position);
 }
 
-function removeEdge(container, edge) {
-    if(selection !== undefined && selection.object === edge) deselect();
-    container.remove(edge);
+function getVertexContainer(object) {
+    return getParent(object).getObjectByName("vertices");
+}
+
+function getEdgeContainer(object) {
+    return getParent(object).getObjectByName("edges");
+}
+
+function getFaceContainer(object) {
+    return getParent(object).getObjectByName("faces");
+}
+
+function removeVertex(vertex) {
+    if (selection !== undefined && selection.object === vertex) deselect();
+    while (vertex.userData.edgeStartRefers !== undefined) {
+        removeEdge(vertex.userData.edgeStartRefers.edge);
+    }
+    while (vertex.userData.edgeEndRefers !== undefined) {
+        removeEdge(vertex.userData.edgeEndRefers.edge);
+    }
+    getVertexContainer(vertex).remove(vertex);
+}
+
+function removeEdge(edge) {
+    if (selection !== undefined && selection.object === edge) deselect();
+
+    while (edge.userData.faceRefers !== undefined) {
+        removeFace(edge.userData.faceRefers.face);
+    }
     removeRef(edge.userData.edgeStart, "vertex", "edge", "edgeStartRefers", "edgeStart");
     removeRef(edge.userData.edgeEnd, "vertex", "edge", "edgeEndRefers", "edgeEnd");
-    // container.children[index] = container.children[container.length - 1];
-    // container.children[index].index = index;
-    // container.children.pop();
+    getEdgeContainer(edge).remove(edge);
+}
+
+function removeFace(face) {
+    if (selection !== undefined && selection.object === face) deselect();
+    while (face.userData.edges !== undefined) {
+        removeDoubleRef(face.userData.edges, "edge", "face", "faceRefers", "edges");
+    }
+    getFaceContainer(face).remove(face);
 }
 
 function addToContainer(container, element) {
@@ -920,50 +1183,69 @@ function addToContainer(container, element) {
 function subdivide(object) {
     if (object === null || object === undefined) return;
     let parent = getParent(object);
-    let vertices = parent.children[0];
-    let edges = parent.children[1];
-    let faces = parent.children[2];
-    console.log(vertices, edges, faces);
-    if (isSelectedFace(object)) {
+    let vertices = getVertexContainer(parent);
+    let edges = getEdgeContainer(parent);
+    let faces = getFaceContainer(parent);
+    // console.log(vertices, edges, faces);
+    if (isObjectFace(object)) {
         if (!allowEditFaces || !showEditFaces) return;
+        return;
     }
-    if (isSelectedLine(object)) {
+    if (isObjectLine(object)) {
         if (!showEditLines) return;
         let old_edge = object;
         let edgeMiddle = old_edge.position;
         let edgeStart = old_edge.userData.edgeStart.vertex;
         let edgeEnd = old_edge.userData.edgeEnd.vertex;
+
+        let faceEdges = [];
+        // console.log("old");
+        for (let faceRefer = old_edge.userData.faceRefers; faceRefer !== undefined; faceRefer = faceRefer["edgeNext"]) {
+            // console.log(faceRefer);
+            faceEdges.push({
+                forward: [],
+                backward: [],
+                dir: true,
+            });
+            for (let edgeRefer = faceRefer["faceNext"]; edgeRefer !== undefined; edgeRefer = edgeRefer["faceNext"]) {
+                faceEdges[faceEdges.length - 1].forward.push(edgeRefer.edge);
+            }
+            for (let edgeRefer = faceRefer["facePrev"]; edgeRefer !== undefined; edgeRefer = edgeRefer["facePrev"]) {
+                faceEdges[faceEdges.length - 1].backward.push(edgeRefer.edge);
+            }
+            if (faceEdges[faceEdges.length - 1].forward.length === 0) {
+                let b_edge = faceEdges[faceEdges.length - 1].backward[0];
+                let newVar = [b_edge.userData.edgeStart.vertex, b_edge.userData.edgeEnd.vertex];
+                if (newVar.includes(faceRefer.edge.userData.edgeEnd.vertex)) faceEdges[faceEdges.length - 1].dir = false;
+            } else {
+                let f_edge = faceEdges[faceEdges.length - 1].forward[0];
+                let newVar = [f_edge.userData.edgeStart.vertex, f_edge.userData.edgeEnd.vertex];
+                if (newVar.includes(faceRefer.edge.userData.edgeStart.vertex)) faceEdges[faceEdges.length - 1].dir = false;
+            }
+        }
+        // console.log("new");
+        removeEdge(old_edge);
+
         let new_vertex = getNewVertex(edgeMiddle.x, edgeMiddle.y, edgeMiddle.z);
         addToContainer(vertices, new_vertex);
         let edge1 = getNewEdge(edgeStart, new_vertex);
         let edge2 = getNewEdge(new_vertex, edgeEnd);
         addToContainer(edges, edge1);
         addToContainer(edges, edge2);
-        removeEdge(edges, old_edge);
+        select({object: getParent(new_vertex)});
+        let i = 0;
 
-
-
-        // let old_edge = object;
-        // let edgeMiddle = old_edge.position;
-        // let new_vertex = getNewVertex(edgeMiddle.x, edgeMiddle.y, edgeMiddle.z, vertices.children.length);
-        // let edge1 = getNewEdge(old_edge.userData.startPoint, new_vertex, old_edge.index);
-        // let edge2 = getNewEdge(new_vertex, old_edge.userData.endPoint, edges.length);
-        //
-        // let faces = [];
-        //
-        // for(let faceRefer of old_edge.userData.faceRefers){
-        //     faces.push({index:faceRefer.index, edges: []});
-        //     let edgeRefer = faceRefer.face.userData.mathObject;
-        //     for(let i = 0 ; i < faceRefer.index ; i ++){
-        //         edgeRefer = edgeRefer.next;
-        //     }
-        //     for(let edgeRefer2 = edgeRefer.next ; edgeRefer2 !== edgeRefer ; edgeRefer2 = edgeRefer2.next){
-        //         faces[faces.length - 1].edges.push(edgeRefer2);
-        //     }
-        // }
-        //
+        for (let faceEdge of faceEdges) {
+            // if (i++ == 0) continue;
+            let face = getNewFace(
+                faceEdge.backward.reverse().concat(faceEdge.dir ? [edge1, edge2] : [edge2, edge1]).concat(faceEdge.forward)
+            );
+            // console.log("5", face);
+            addToContainer(faces, face);
+        }
+        render();
+        return;
     }
-    render();
     console.log("what are you subdividing: ", object);
 }
 
@@ -974,3 +1256,4 @@ if (!WebGL.isWebGLAvailable()) {
 } else {
     init();
 }
+window.THREE = THREE
