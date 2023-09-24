@@ -9,7 +9,7 @@ import {Toolbar} from "./Toolbar";
 let container, stats, gui;
 let camera, scene, renderer;
 let controls, transformControls;
-let editorSignals, selection;
+let editorSignals, selection = undefined;
 let showEditPoints = true, showEditLines = true, showEditFaces = true, allowEditFaces = false;
 
 const objectsGroup = new THREE.Group();
@@ -122,12 +122,16 @@ function removeRef(reference, firstName, secondName, firstStart, secondPos) {
     second.userData[secondPos] = undefined;
 }
 
-function addDoubleRef(first, second, firstName, secondName, firstStart, secondStart){ //todo maybe refactor firstStart the same way as prev and next
+function addDoubleRef(first, second, firstName, secondName, firstStart, secondStart) { //todo maybe refactor firstStart the same way as prev and next
     let ref = {};
-    let firstPrev = firstName + "Prev"; ref[firstPrev] = undefined;
-    let firstNext = firstName + "Next"; ref[firstNext] = undefined;
-    let secondPrev = secondName + "Prev"; ref[secondPrev] = undefined;
-    let secondNext = secondName + "Next"; ref[secondNext] = undefined;
+    let firstPrev = firstName + "Prev";
+    ref[firstPrev] = undefined;
+    let firstNext = firstName + "Next";
+    ref[firstNext] = undefined;
+    let secondPrev = secondName + "Prev";
+    ref[secondPrev] = undefined;
+    let secondNext = secondName + "Next";
+    ref[secondNext] = undefined;
     ref[firstName] = first;
     ref[secondName] = second;
     if (first.userData[firstStart] === undefined) first.userData[firstStart] = ref;
@@ -203,11 +207,10 @@ function removeVertexTriangleRef(triangleRef) {
 }
 */
 
-function getNewVertex(verticesPosition1, verticesPosition2, verticesPosition3, i) {
+function getNewVertex(verticesPosition1, verticesPosition2, verticesPosition3) {
     let pointObject = new Points();
     let point = new THREE.Vector3(verticesPosition1, verticesPosition2, verticesPosition3);
 
-    pointObject.userData.index = i;
     pointObject.userData.mathObject = point;
     pointObject.userData.edgeStartRefers = undefined;
     pointObject.userData.edgeEndRefers = undefined;
@@ -224,7 +227,7 @@ function getNewVertex(verticesPosition1, verticesPosition2, verticesPosition3, i
     return pointObject;
 }
 
-function getNewEdge(vertex1, vertex2, i) {
+function getNewEdge(vertex1, vertex2) {
     let edgeObject = new THREE.Line();
 
     edgeObject.userData.edgeStart = undefined;
@@ -238,7 +241,6 @@ function getNewEdge(vertex1, vertex2, i) {
     let point2 = edgeObject.userData.edgeEnd.vertex.userData.mathObject;
     let line = new THREE.Line3(point1, point2);
 
-    edgeObject.userData.index = i;
     edgeObject.userData.mathObject = line;
     edgeObject.userData.position = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
     edgeObject.userData.locked = false;
@@ -259,16 +261,15 @@ function getNewEdge(vertex1, vertex2, i) {
     return edgeObject;
 }
 
-function getNewFace(edgeList, i) {
+function getNewFace(edgeList) {
     let faceObject = new THREE.Mesh();
     let edgeCount = edgeList.length;
 
     faceObject.userData.edges = undefined;
-    for (let i = edgeList.length -1 ; i >= 0; i--) {
+    for (let i = edgeList.length - 1; i >= 0; i--) {
         addRef(edgeList[i], faceObject, "edge", "face", "faceRefers", "edges");
     }
 
-    faceObject.userData.index = i;
     faceObject.userData.edgeCount = edgeCount;
     // faceObject.userData.pointsSum = new THREE.Vector3(0, 0, 0);
     // faceObject.userData.normalsSum = new THREE.Vector3(0, 0, 0);
@@ -311,8 +312,7 @@ function addCube(dim = 250) {
         dimHalf, dimHalf, dimHalf
     ]);
     for (let i = 0; i < verticesPositions.length; i += 3) {
-        let pointObject = getNewVertex(verticesPositions[i], verticesPositions[i + 1], verticesPositions[i + 2], i / 3);
-        vertices.add(pointObject);
+        addToContainer(vertices, getNewVertex(verticesPositions[i], verticesPositions[i + 1], verticesPositions[i + 2]));
     }
     containerGroup.add(vertices);
 
@@ -327,9 +327,7 @@ function addCube(dim = 250) {
         let vertex1 = vertices.children[index1];
         let vertex2 = vertices.children[index2];
 
-        let lineObject = getNewEdge(vertex1, vertex2, (i / 2) | 0);
-
-        edges.add(lineObject);
+        addToContainer(edges, getNewEdge(vertex1, vertex2));
     }
     containerGroup.add(edges);
 
@@ -353,9 +351,7 @@ function addCube(dim = 250) {
         let edge4 = edges.children[index4];
         let edgeList = [edge1, edge2, edge3, edge4];
 
-        // let faceObject = getNewFace(edgeList, (i / 4) | 0);
-
-        // faces.add(faceObject);
+        addToContainer(faces, getNewFace(edgeList));
     }
     containerGroup.add(faces);
     // console.log(faces);
@@ -576,7 +572,7 @@ function rayCasting() {
     });
 
     editorSignals.selectionChanged.add(function (new_selection) {
-        if (selection != null) {
+        if (selection !== undefined && false) { // todo remove this && false
             getParent(selection.object).traverse(function (child) {
                 if (child.userData.groupClass === "vertices") {
                     child.visible = false;
@@ -589,7 +585,7 @@ function rayCasting() {
                     child.visible = true;
                 }
             });
-            selection = null;
+            selection = undefined;
         }
         transformControls.detach();
         if (!(new_selection === null || new_selection === undefined) && new_selection.object !== scene && new_selection.object !== camera) {
@@ -656,7 +652,7 @@ function select(new_selection) { //todo
 }
 
 function deselect() {
-    select(null);
+    select(undefined);
 }
 
 function onMouseUp(event) {
@@ -837,7 +833,7 @@ function updateVertex(vertex, new_position) {
     }
 
 
-    for (let ref = vertex.userData.triangleRefers;ref !== undefined; ref = ref.next) {
+    for (let ref = vertex.userData.triangleRefers; ref !== undefined; ref = ref.next) {
         if (ref.triangle.face.userData.locked) continue;
 
         //
@@ -906,9 +902,24 @@ function updateFace(face, new_position) {
     face.userData.position.copy(face.position);
 }
 
+function removeEdge(container, edge) {
+    if(selection !== undefined && selection.object === edge) deselect();
+    container.remove(edge);
+    removeRef(edge.userData.edgeStart, "vertex", "edge", "edgeStartRefers", "edgeStart");
+    removeRef(edge.userData.edgeEnd, "vertex", "edge", "edgeEndRefers", "edgeEnd");
+    // container.children[index] = container.children[container.length - 1];
+    // container.children[index].index = index;
+    // container.children.pop();
+}
+
+function addToContainer(container, element) {
+    // element.index = container.length;
+    container.add(element);
+}
+
 function subdivide(object) {
     if (object === null || object === undefined) return;
-    parent = getParent(object);
+    let parent = getParent(object);
     let vertices = parent.children[0];
     let edges = parent.children[1];
     let faces = parent.children[2];
@@ -916,8 +927,22 @@ function subdivide(object) {
     if (isSelectedFace(object)) {
         if (!allowEditFaces || !showEditFaces) return;
     }
-    if (isSelectedLine(object)) { // todo maybe redo, at this point I gave up anything smart and went for the brute force because I don't have time
+    if (isSelectedLine(object)) {
         if (!showEditLines) return;
+        let old_edge = object;
+        let edgeMiddle = old_edge.position;
+        let edgeStart = old_edge.userData.edgeStart.vertex;
+        let edgeEnd = old_edge.userData.edgeEnd.vertex;
+        let new_vertex = getNewVertex(edgeMiddle.x, edgeMiddle.y, edgeMiddle.z);
+        addToContainer(vertices, new_vertex);
+        let edge1 = getNewEdge(edgeStart, new_vertex);
+        let edge2 = getNewEdge(new_vertex, edgeEnd);
+        addToContainer(edges, edge1);
+        addToContainer(edges, edge2);
+        removeEdge(edges, old_edge);
+
+
+
         // let old_edge = object;
         // let edgeMiddle = old_edge.position;
         // let new_vertex = getNewVertex(edgeMiddle.x, edgeMiddle.y, edgeMiddle.z, vertices.children.length);
@@ -938,6 +963,7 @@ function subdivide(object) {
         // }
         //
     }
+    render();
     console.log("what are you subdividing: ", object);
 }
 
