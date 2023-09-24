@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {Points} from 'three';
+import {Points, Vector3} from 'three';
 import WebGL from 'three/addons/capabilities/WebGL.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GUI} from "three/addons/libs/lil-gui.module.min";
@@ -14,13 +14,8 @@ if (!WebGL.isWebGLAvailable()) {
     let container, stats, gui;
     let camera, scene, renderer;
     let controls, transformControls;
-    let editorSignals, selection, selectionType;
+    let editorSignals, selection;
     let showEditPoints = true, showEditLines = false, showEditFaces = true, allowEditFaces = false;
-
-
-    // const pointer = new THREE.Vector2();
-    // const onUpPosition = new THREE.Vector2();
-    // const onDownPosition = new THREE.Vector2();
 
     const objectsGroup = new THREE.Group();
     const raycaster = new THREE.Raycaster();
@@ -47,7 +42,6 @@ if (!WebGL.isWebGLAvailable()) {
 
     function init() {
 
-
         container = document.getElementById('container');
 
         renderer = new THREE.WebGLRenderer({antialias: true});
@@ -69,7 +63,6 @@ if (!WebGL.isWebGLAvailable()) {
         controls.addEventListener('change', render);
 
         initSignals();
-
         rayCasting();
 
 
@@ -77,97 +70,21 @@ if (!WebGL.isWebGLAvailable()) {
         container.appendChild(toolbar.dom);
 
         addSceneLight();
-
-
         addGui();
 
 
         transformControls = new TransformControls(camera, renderer.domElement);
         addTransformControls(transformControls);
-        // transformControl = new TransformControls( camera, renderer.domElement );
-        // transformControl.addEventListener( 'change', render );
-        // transformControl.addEventListener( 'dragging-changed', function ( event ) {controls.enabled = ! event.value;} );
-        // scene.add( transformControl );
 
-        // transformControl.addEventListener( 'objectChange', function () {} );
-
-        // document.addEventListener( 'pointerdown', onPointerDown );
-        // document.addEventListener( 'pointerup', onPointerUp );
-        // document.addEventListener( 'pointermove', onPointerMove );
         container.addEventListener('mousedown', onMouseDown);
         window.addEventListener('resize', onWindowResize);
 
-        //
-        //
-        // const verticesOfCube = [
-        //     -1,-1,-1,    1,-1,-1,    1, 1,-1,    -1, 1,-1,
-        //     -1,-1, 1,    1,-1, 1,    1, 1, 1,    -1, 1, 1,
-        // ];
-        //
-        // const indicesOfFaces = [
-        //     2,1,0,    0,3,2,
-        //     0,4,7,    7,3,0,
-        //     0,1,5,    5,4,0,
-        //     1,2,6,    6,5,1,
-        //     2,3,7,    7,6,2,
-        //     4,5,6,    6,7,4
-        // ];
-
-        // const geometry = new THREE.PolyhedronGeometry( verticesOfCube, indicesOfFaces, 180, 0 );
-        // const material = new THREE.MeshNormalMaterial( { color: 0xff0000, wireframe: false } );
-        // const mesh = new THREE.Mesh( geometry, material );
-        // mesh.position.set(300,0,-300);
-        // scene.add( mesh );
-
+        addCube();
 
         render();
 
     }
 
-    // function onPointerDown( event ) {
-    //
-    //     onDownPosition.x = event.clientX;
-    //     onDownPosition.y = event.clientY;
-    //
-    // }
-    //
-    // function onPointerUp( event ) {
-    //
-    //     onUpPosition.x = event.clientX;
-    //     onUpPosition.y = event.clientY;
-    //
-    //     if ( onDownPosition.distanceTo( onUpPosition ) === 0 ) {
-    //
-    //         transformControls.detach();
-    //         render();
-    //
-    //     }
-    //
-    // }
-    //
-    // function onPointerMove( event ) {
-    //
-    //     pointer.x = ( event.clientX / window.innerWidth ) * 2 - 1;
-    //     pointer.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
-    //
-    //     raycaster.setFromCamera( pointer, camera );
-    //
-    //     const intersects = [];
-    //         // raycaster.intersectObjects( splineHelperObjects, false );
-    //
-    //     if ( intersects.length > 0 ) {
-    //
-    //         const object = intersects[ 0 ].object;
-    //
-    //         if ( object !== transformControl.object ) {
-    //
-    //             transformControl.attach( object );
-    //
-    //         }
-    //
-    //     }
-    //
-    // }
 
     function onWindowResize() {
 
@@ -214,6 +131,8 @@ if (!WebGL.isWebGLAvailable()) {
             pointObject.userData.linesStart = [];
             pointObject.userData.linesEnd = [];
             pointObject.userData.triangleRefers = [];
+            pointObject.userData.position = new THREE.Vector3(0, 0, 0);
+            pointObject.userData.locked = false;
 
             vertices.add(pointObject);
 
@@ -221,6 +140,7 @@ if (!WebGL.isWebGLAvailable()) {
 
             let bufferGeometry = (new THREE.BufferGeometry()).setFromPoints([new THREE.Vector3(0, 0, 0)]);
             pointObject.position.copy(point);
+            pointObject.userData.position.copy(pointObject.position);
             pointObject.geometry = bufferGeometry;
 
             pointObject.material = new THREE.PointsMaterial({color: 0xff00ff, size: 15, sizeAttenuation: false});
@@ -251,13 +171,16 @@ if (!WebGL.isWebGLAvailable()) {
 
             lineObject.userData.index = i / 2;
             lineObject.userData.mathObject = line;
-
+            lineObject.userData.position = new THREE.Vector3(0, 0, 0);
+            lineObject.userData.locked = false;
             edges.add(lineObject);
 
-            let startPoint = new THREE.Vector3();
-            let endPoint = point2.clone().sub(point1);
+            let midPoint = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
+            let startPoint = point1.clone().sub(midPoint);
+            let endPoint = point2.clone().sub(midPoint);
             let lineGeometry = (new THREE.BufferGeometry()).setFromPoints([startPoint, endPoint]);
-            lineObject.position.copy(point1);
+            lineObject.position.copy(midPoint);
+            lineObject.userData.position.copy(lineObject.position);
             lineObject.geometry = lineGeometry;
 
             lineObject.material = new THREE.LineBasicMaterial({
@@ -319,166 +242,24 @@ if (!WebGL.isWebGLAvailable()) {
             faceObject.userData.mathObject = edge1;
             faceObject.userData.edgeCount = 4;
             faceObject.userData.triangleRefers = [];
-            // faceObject.visible = false;
+            faceObject.userData.runningAveragePoints = new THREE.Vector3(0, 0, 0);
+            faceObject.userData.runningAverageNormal = new THREE.Vector3(0, 0, 0);
+            faceObject.userData.position = new THREE.Vector3(0, 0, 0);
+            faceObject.userData.locked = false;
 
             faces.add(faceObject);
 
-            faceObject.geometry = getFaceGeometry(faceObject);
-            // if (i == 0)
-            //     console.log(faceObject);
+            getFaceGeometry(faceObject);
 
-            faceObject.material = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
+            faceObject.material = new THREE.MeshNormalMaterial({
+                // color: Math.random() * 0xffffff,
                 // wireframe: true,
             });
         }
         containerGroup.add(faces);
+        // console.log(faces);
 
-        // let index = [
-        //     0, 1, 2, 2, 1, 3,
-        //     6, 5, 4, 5, 6, 7,
-        //     4, 1, 0, 1, 4, 5,
-        //     2, 3, 6, 7, 6, 3,
-        //     0, 2, 4, 6, 4, 2,
-        //     5, 3, 1, 3, 5, 7
-        // ];
-        //
-        // let verticies = new THREE.Group();
-        //
-        // let cubeGeometry = new THREE.BufferGeometry();
-        // cubeGeometry.setIndex(index);
-        // cubeGeometry.setAttribute('position', new THREE.BufferAttribute(verticiesPositions, 3));
-        //
-        // cubeGeometry.translate(250, 250, 250);
-        // containerGroup.add(new THREE.Mesh(cubeGeometry, new THREE.MeshBasicMaterial({
-        //     color: Math.random() * 0xffffff,
-        //     // wireframe: true,
-        // })));
 
-        //
-        // let cubeGeometry = new THREE.BoxGeometry(250, 250, 250);
-        // cubeGeometry.deleteAttribute('normal');
-        // cubeGeometry.deleteAttribute('uv');
-        // cubeGeometry = mergeVertices(cubeGeometry);
-        //
-
-        // const triangles = cubeGeometry.index.length / 3;
-        // const positions = cubeGeometry.getAttribute( 'position' ).array;
-        // const normals = new Float32Array( triangles * 3 * 3 );
-        // const colors = new Float32Array( triangles * 3 * 3 );
-        //
-        // const color = new THREE.Color();
-        //
-        // const pA = new THREE.Vector3();
-        // const pB = new THREE.Vector3();
-        // const pC = new THREE.Vector3();
-        //
-        // const cb = new THREE.Vector3();
-        // const ab = new THREE.Vector3();
-        //
-        // for ( let i = 0; i < positions.length; i += 9 ) {
-        //
-        //
-        //     pA.set( positions[ i ], positions[ i + 1 ], positions[ i + 2 ] );
-        //     pB.set( positions[ i + 3 ], positions[ i + 4 ], positions[ i + 5 ] );
-        //     pC.set( positions[ i + 6 ], positions[ i + 7 ], positions[ i + 8 ] );
-        //
-        //     cb.subVectors( pC, pB );
-        //     ab.subVectors( pA, pB );
-        //     cb.cross( ab );
-        //
-        //     cb.normalize();
-        //
-        //     const nx = cb.x;
-        //     const ny = cb.y;
-        //     const nz = cb.z;
-        //
-        //     normals[ i ] = nx;
-        //     normals[ i + 1 ] = ny;
-        //     normals[ i + 2 ] = nz;
-        //
-        //     normals[ i + 3 ] = nx;
-        //     normals[ i + 4 ] = ny;
-        //     normals[ i + 5 ] = nz;
-        //
-        //     normals[ i + 6 ] = nx;
-        //     normals[ i + 7 ] = ny;
-        //     normals[ i + 8 ] = nz;
-        //
-        //     // colors
-        //
-        //     // const vx = ( x / n ) + 0.5;
-        //     // const vy = ( y / n ) + 0.5;
-        //     // const vz = ( z / n ) + 0.5;
-        //     //
-        //     // color.setRGB( vx, vy, vz );
-        //     //
-        //     // colors[ i ] = color.r;
-        //     // colors[ i + 1 ] = color.g;
-        //     // colors[ i + 2 ] = color.b;
-        //     //
-        //     // colors[ i + 3 ] = color.r;
-        //     // colors[ i + 4 ] = color.g;
-        //     // colors[ i + 5 ] = color.b;
-        //     //
-        //     // colors[ i + 6 ] = color.r;
-        //     // colors[ i + 7 ] = color.g;
-        //     // colors[ i + 8 ] = color.b;
-        //
-        // }
-        //
-        // // geometry.setAttribute( 'position', new THREE.BufferAttribute( positions, 3 ) );
-        // cubeGeometry.setAttribute( 'normal', new THREE.BufferAttribute( normals, 3 ) );
-        // // geometry.setAttribute( 'color', new THREE.BufferAttribute( colors, 3 ) );
-        //
-
-        // let normlas = new Float32Array(cubeGeometry.attributes.position.array.length);
-        //
-        // for (let i = 0; i < cubeGeometry.attributes.position.array.length; i += 3) {
-        //     let pA = new THREE.Vector3(cubeGeometry.attributes.position.array[i], cubeGeometry.attributes.position.array[i + 1], cubeGeometry.attributes.position.array[i + 2]);
-        //     pA.normalize();
-        //     normlas[i] = pA.x;
-        //     normlas[i + 1] = pA.y;
-        //     normlas[i + 2] = pA.z;
-        // }
-        //
-        // cubeGeometry.setAttribute('normal', new THREE.BufferAttribute(normlas, 3));
-        // // cubeGeometry.computeVertexNormals();
-        // // cubeGeometry.normalizeNormals();
-        //
-        // // cubeGeometry.computeBoundingSphere();
-        // console.log(cubeGeometry);
-        //
-        // let coordinates = cubeGeometry.getAttribute('position').array;
-        // // console.log(cubeGeometry.getAttribute('position'));
-        // for (let i = 0; i < coordinates.length; i += 3) {
-        //     let point = new THREE.Vector3(coordinates[i], coordinates[i + 1], coordinates[i + 2]);
-        //     let helper_object = new Points((new THREE.BufferGeometry()).setFromPoints([new THREE.Vector3(0, 0, 0)]),
-        //         new THREE.PointsMaterial({
-        //             color: 0xff00ff,
-        //             size: 15,
-        //             sizeAttenuation: false
-        //         }));
-        //     helper_object.userData.index = i / 3;
-        //     helper_object.position.copy(point);
-        //     helper_object.visible = false;
-        //     verticies.add(helper_object);
-        // }
-        //
-        // // verticies = new THREE.Points(cubeGeometry, new THREE.PointsMaterial({
-        // //     color: 0xff00ff, size: 15, sizeAttenuation: false
-        // // }));
-        //
-        // // console.log(verticies);
-        //
-        // let cubeMesh = new THREE.MeshNormalMaterial({color: Math.random() * 0xffffff, wireframe: false,});
-        // // cubeGeometry = ;
-        // let cube = new THREE.Mesh(cubeGeometry, cubeMesh);
-        //
-        // // verticies.visible = false;
-        //
-        // // containerGroup.add(verticies);
-        // // containerGroup.add(cube);
         containerGroup.translateX(125);
         containerGroup.translateY(125);
         containerGroup.translateZ(125);
@@ -592,21 +373,15 @@ if (!WebGL.isWebGLAvailable()) {
         };
 
         editorSignals.transformModeChanged.add(function (mode) {
-
             transformControls.setMode(mode);
-
         });
 
         editorSignals.snapChanged.add(function (dist) {
-
             transformControls.setTranslationSnap(dist);
-
         });
 
         editorSignals.spaceChanged.add(function (space) {
-
             transformControls.setSpace(space);
-
         });
 
         editorSignals.editPointsChanged.add(function (newShowEditPoints) {
@@ -641,54 +416,117 @@ if (!WebGL.isWebGLAvailable()) {
     function addTransformControls() {
 
         transformControls.addEventListener('change', function () {
-
             const object = transformControls.object;
-
             if (object !== undefined) {
+                function updateVertex(vertex, new_position) {
+                    vertex.userData.position.copy(new_position);
+                    vertex.position.copy(new_position);
 
-                // box.setFromObject( object, true );
+                    vertex.userData.mathObject.copy(vertex.position);
+                    for (let line of vertex.userData.linesStart.concat(vertex.userData.linesEnd)) {
+                        if (line.userData.locked) continue;
 
-                // const helper = editor.helpers[ object.id ];
+                        let point1 = line.userData.mathObject.start;
+                        let point2 = line.userData.mathObject.end;
+                        let midPoint = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
+                        let startPoint = point1.clone().sub(midPoint);
+                        let endPoint = point2.clone().sub(midPoint);
 
-                // if ( helper !== undefined && helper.isSkeletonHelper !== true ) {
-                //
-                //     helper.update();
-                //
-                // }
+                        line.position.copy(midPoint);
+                        line.userData.position.copy(midPoint);
+                        let linePosition = line.geometry.getAttribute("position");
+                        linePosition.setXYZ(0, startPoint.x, startPoint.y, startPoint.z);
+                        linePosition.setXYZ(1, endPoint.x, endPoint.y, endPoint.z);
 
-                // signals.refreshSidebarObject3D.dispatch( object );
+                        linePosition.needsUpdate = true;
+                    }
 
-                if (showEditPoints && isSelectedPoint(object)) {
-                    console.log("moving point");
-                    // // todo pull on linked elements
+                    for (let triangleGroup of vertex.userData.triangleRefers) {
+                        if (triangleGroup.triangle.face.userData.locked) continue;
 
+                        let triangle = triangleGroup.triangle;
+                        let triangleIndex = triangleGroup.index;
+                        let point1 = triangle.points[0].userData.mathObject;
+                        let point2 = triangle.points[1].userData.mathObject;
+                        let point3 = triangle.points[2].userData.mathObject;
 
-                    // let group_top = getParent(object);
-                    // console.log("group top",group_top);
-                    // let group_vertices = group_top.children[0];
-                    // let geometry_position = group_geometry.getAttribute("position");
-                    // let new_position = object.position;
-                    // // console.log();
-                    // // console.log(geometry_position);
-                    // geometry_position.setXYZ(selection.object.userData.index, new_position.x, new_position.y, new_position.z);
-                    // // console.log(geometry_position)
-                    // //
-                    // // geometry_position.copyAt(selection.index,selection.object.position);
-                    // // console.log(geometry_position);
-                    //
-                    //
-                    // group_geometry.getAttribute("position").needsUpdate = true; //todo what does this do
-                    // // group_geometry.attributes.position.needsUpdate = true;
-                    // // console.log(group_geometry);
-                    // // console.log(group_points);
-                } else if (showEditLines && isSelectedLine(object)) {
-                    console.log("moving line");
-                } else if (showEditFaces && allowEditFaces && isSelectedFace(object)) {
-                    console.log("moving face");
+                        let point;
+                        if (triangleIndex === 0) point = point1;
+                        else if (triangleIndex === 1) point = point2;
+                        else point = point3;
+
+                        point = point.clone().sub(triangle.face.position);
+
+                        let facePosition = triangle.face.geometry.getAttribute("position");
+                        facePosition.setXYZ(triangleIndex + triangle.index * 3, point.x, point.y, point.z);
+                        facePosition.needsUpdate = true;
+
+                        let normal = triangle.normal;
+                        triangle.face.userData.runningAverageNormal.sub(normal);
+                        normal.subVectors(point3, point2).cross(new Vector3().subVectors(point1, point2));
+                        triangle.face.userData.runningAverageNormal.add(normal);
+                        let normalized = normal.clone().normalize();
+
+                        let faceNormal = triangle.face.geometry.getAttribute("normal");
+                        faceNormal.setXYZ(triangle.index * 3, normalized.x, normalized.y, normalized.z);
+                        faceNormal.setXYZ(triangle.index * 3 + 1, normalized.x, normalized.y, normalized.z);
+                        faceNormal.setXYZ(triangle.index * 3 + 2, normalized.x, normalized.y, normalized.z);
+                        faceNormal.needsUpdate = true; // todo remove; ahahahahaha, now I learned what needsUpdate means
+                    }
                 }
 
-            }
+                function updateEdge(edge, new_position) {
+                    edge.position.copy(new_position);
+                    edge.userData.locked = true;
+                    let translation = edge.position.clone().sub(edge.userData.position);
+                    updateVertex(edge.userData.startPoint, edge.userData.mathObject.start.clone().add(translation));
+                    updateVertex(edge.userData.endPoint, edge.userData.mathObject.end.clone().add(translation));
+                    edge.userData.locked = false;
+                    edge.userData.position.copy(edge.position);
+                    edge.matrixWorldAutoUpdate = true;
+                }
 
+                function updateFace(face, new_position) {
+                    face.position.copy(new_position);
+                    face.userData.locked = true;
+                    let translation = object.position.clone().sub(object.userData.position);
+
+                    let firstEdge = face.userData.mathObject;
+                    let secondEdges = [firstEdge];
+                    while (secondEdges[secondEdges.length - 1].next !== firstEdge && secondEdges[secondEdges.length - 1].next.next !== firstEdge) secondEdges.push(secondEdges[secondEdges.length - 1].next.next);
+
+                    for (let edge of secondEdges) {
+                        updateEdge(edge.ref, edge.ref.position.clone().add(translation));
+                    }
+
+                    if (face.userData.edgeCount % 2 !== 0) {
+                        let edge = secondEdges[secondEdges.length - 1].next;
+                        let vertex = edge.dir ? edge.ref.userData.startPoint : edge.ref.userData.endPoint;
+                        updateVertex(vertex, vertex.position.clone().add(translation));
+                    }
+
+                    face.userData.locked = false;
+                    face.userData.position.copy(face.position);
+                }
+
+                if (showEditPoints && isSelectedPoint(object)) {
+                    console.log("moving point", object);
+                    updateVertex(object, object.position);
+                } else if (showEditLines && isSelectedLine(object)) {
+                    console.log("moving line", object);
+                    updateEdge(object, object.position);
+                    // let position = object.userData.position;
+                    // let startPoint = object.userData.startPoint;
+                    // let endPoint = object.userData.endPoint;
+                    // startPoint.userData.position.copy(object.position).sub(position).add(startPoint.userData.mathObject);
+                    // endPoint.userData.position.copy(object.position).sub(position).add(endPoint.userData.mathObject);
+                    // updateVertex(startPoint, startPoint.userData.position);
+                    // updateVertex(endPoint, endPoint.userData.position);
+                } else if (showEditFaces && allowEditFaces && isSelectedFace(object)) {
+                    console.log("moving face");
+                    updateFace(object, object.position);
+                }
+            }
             render();
 
         });
@@ -738,8 +576,6 @@ if (!WebGL.isWebGLAvailable()) {
 
 
         editorSignals.selectionChanged.add(function (new_selection) {
-            // console.log(selection, new_selection, showEditPoints, showEditLines, showEditFaces);
-            // selectionBox.visible = false;
             if (selection != null) {
                 getParent(selection.object).traverse(function (child) {
                     if (child.userData.groupClass === "vertices") {
@@ -758,16 +594,7 @@ if (!WebGL.isWebGLAvailable()) {
             transformControls.detach();
             if (!(new_selection === null || new_selection === undefined) && new_selection.object !== scene && new_selection.object !== camera) {
 
-                // box.setFromObject( object, true );
-
-                // if ( box.isEmpty() === false ) {
-                //
-                //     selectionBox.visible = true;
-                //
-                // }
-
                 selection = new_selection;
-
 
                 getParent(selection.object).traverse(function (child) {
                     if (showEditPoints && child.userData.groupClass === "vertices") {
@@ -781,40 +608,17 @@ if (!WebGL.isWebGLAvailable()) {
                     }
                 });
                 if (showEditPoints && isSelectedPoint(selection.object)) {
-                    // console.log(selection.index)
-                    // let points = selection.object.geometry.attributes.position.array;
-                    // for (let i = 0; i < points.length; i += 3) {
-                    //     console.log(points[i], points[i + 1], points[i + 2])
-                    // }
-                    // console.log(points)
-
-                    // let v = selection.object.geometry.attributes.position.array.slice(selection.index * 3,selection.index * 3 + 3);
-                    // let point = new THREE.Vector3(v[0], v[1], v[2]);
-                    //
-                    // let helper_object = new Points((new THREE.BufferGeometry()).setFromPoints([new THREE.Vector3(0, 0, 0)]));
-                    // helper_object.position.copy(point);
-                    // helper_object.visible=false;
-                    // scene.add(helper_object);
-                    // transformControls.attach(helper_object);
-
                     transformControls.attach(selection.object);
-
-                } else if(showEditLines && isSelectedLine(selection.object))
-                {
+                } else if (showEditLines && isSelectedLine(selection.object)) {
                     transformControls.attach(selection.object);
-                }else if(showEditFaces && allowEditFaces && isSelectedFace(selection.object)){
+                } else if (showEditFaces && allowEditFaces && isSelectedFace(selection.object)) {
                     transformControls.attach(selection.object);
-                }
-                else{
+                } else {
                     transformControls.attach(getParent(selection.object));
                 }
             }
-
             render();
-
         });
-
-
     }
 
     function getParent(object) {
@@ -825,40 +629,16 @@ if (!WebGL.isWebGLAvailable()) {
     }
 
     function getIntersects(point) {
-
         mouse.set((point.x * 2) - 1, -(point.y * 2) + 1);
-
         raycaster.setFromCamera(mouse, camera);
-
         const _objects = [];
 
         objectsGroup.traverseVisible(function (child) {
-            _objects.push(child);
+            if (!(child instanceof THREE.Group))
+                _objects.push(child);
         });
 
-        // console.log(_objects)
-        //
-        // console.log(objectsGroup.children[0])
-        // console.log(objectsGroup.children[0].children[0])
-        //
-        // _objects.push(objectsGroup.children[0].children[0]);
-        //
-        // console.log(_objects)
-
-        //
-        // sceneHelpers.traverseVisible( function ( child ) {
-        //
-        //     if ( child.name === 'picker' ) _objects.push( child );
-        //
-        // } );
-        // todo when onTransformShowEditPoints is true
-
-        // console.log(_objects);
-        // let intersectObjects = raycaster.intersectObjects(_objects, false);
-        // console.log(intersectObjects);
-        // return intersectObjects;
-
-        return raycaster.intersectObjects(_objects, false);
+        return raycaster.intersectObjects(_objects, true); //todo this has bugs or I am not using it right
 
     }
 
@@ -878,9 +658,7 @@ if (!WebGL.isWebGLAvailable()) {
     }
 
     function deselect() {
-
         select(null);
-
     }
 
     function onMouseUp(event) {
@@ -898,11 +676,11 @@ if (!WebGL.isWebGLAvailable()) {
         return object instanceof THREE.Points;
     }
 
-    function isSelectedLine(object){ // todo refactor these three with parent group class
+    function isSelectedLine(object) { // todo refactor these three with parent group class
         return object instanceof THREE.Line;
     }
 
-    function isSelectedFace(object){
+    function isSelectedFace(object) {
         return object instanceof THREE.Mesh;
     }
 
@@ -918,54 +696,58 @@ if (!WebGL.isWebGLAvailable()) {
     }
 
     function getMousePosition(dom, x, y) {
-
+        // console.log(dom);
         const rect = dom.getBoundingClientRect();
         return [(x - rect.left) / rect.width, (y - rect.top) / rect.height];
 
     }
 
     function getFaceGeometry(faceObject, offset = 0) {
-        // console.log("NEW");
+        let triangleCount = faceObject.userData.edgeCount - 2;
 
         let firstEdge = faceObject.userData.mathObject;
-        // console.log(firstEdge)
         for (let i = 0; i < offset; i++) firstEdge = firstEdge.next;
 
         let edges = [firstEdge];
         while (edges[edges.length - 1].next !== firstEdge) edges.push(edges[edges.length - 1].next);
 
         let points = [];
-
         for (let edge of edges) {
-            // console.log(edge.dir, edge.ref.userData.startPoint.userData.mathObject, edge.ref.userData.endPoint.userData.mathObject)
             if (edge.dir) points.push(edge.ref.userData.startPoint);
             else points.push(edge.ref.userData.endPoint);
         }
 
-        // for (let i = 0; i < points.length; i++) {
-        //     let v31 = points[i].userData.mathObject;
-        //     let v32 = points[(i + 1) % points.length].userData.mathObject;
-        //     console.log(v31, v32, v31.distanceTo(v32));
-        // }
+        faceObject.userData.runningAveragePoints.set(0, 0, 0);
+        for (let point of points) {
+            faceObject.userData.runningAveragePoints.add(point.userData.mathObject);
+        }
+        faceObject.position.copy(faceObject.userData.runningAveragePoints.clone().divideScalar(points.length));
+        faceObject.userData.position.copy(faceObject.position);
+
+        let geometry = faceObject.geometry;
+        if (geometry === undefined) {
+            geometry = new THREE.BufferGeometry();
+            faceObject.geometry = geometry;
+        }
+        geometry.setDrawRange(0, 3 * 3 * triangleCount);
 
         const redundancy = 3;
-        let geometry = new THREE.BufferGeometry();
-        // console.log(3 * 3 * (faceObject.userData.edgeCount - 2) * redundancy);
-        let emptyArray = new Float32Array(3 * 3 * (faceObject.userData.edgeCount - 2) * redundancy);
-        // console.log(emptyArray);
-        // console.log(emptyArray.length);
-        // console.log(emptyArray[10] = 7);
-        // console.log(emptyArray[10]);
-        geometry.setAttribute('position', new THREE.BufferAttribute(emptyArray, 3));
-        // let positionAttribute = geometry.getAttribute('position');
-        let vertices = geometry.getAttribute('position').array;
-        // console.log();
-        let index = 0;
-        faceObject.userData.triangleRefers.length = 0;
-        for (let i = 0; i < points.length - 2; i++) {
+        let arraySize = 3 * 3 * triangleCount * redundancy;
+
+
+        let positionAttribute = geometry.getAttribute('position');
+        if (positionAttribute === undefined || positionAttribute.array.length < arraySize) {
+            if (positionAttribute !== undefined) positionAttribute.dispose();
+            positionAttribute = new THREE.BufferAttribute(new Float32Array(arraySize), 3);
+            geometry.setAttribute('position', positionAttribute);
+        }
+
+        const cb = new Vector3(), ab = new Vector3();
+        faceObject.userData.triangleRefers.length = 0; // todo undo references
+        for (let i = 0; i < triangleCount; i++) {
             let topIndex = (i + 1) / 2 | 0;
             let bottomIndex = points.length - 1 - (i / 2 | 0);
-            let triangle = {index: i, ref: faceObject, points: [], edges: []};
+            let triangle = {index: i, face: faceObject, points: [], edges: [], normal: new Vector3()};
             faceObject.userData.triangleRefers.push(triangle);
             if (i === points.length - 3 && points.length % 2 === 0) {
                 triangle.edges.push(edges[topIndex]);
@@ -984,32 +766,53 @@ if (!WebGL.isWebGLAvailable()) {
 
             for (let j = 0; j < triangle.edges.length; j++) {
                 let edge = triangle.edges[j];
-                edge.ref.userData.triangleRefers.push({index: j, ref: triangle});
+                edge.ref.userData.triangleRefers.push({index: j, triangle: triangle});
             }
 
             for (let j = 0; j < triangle.points.length; j++) {
                 let point = triangle.points[j];
-                point.userData.triangleRefers.push({index: j, ref: triangle});
-                // positionAttribute.
-                // console.log("POINT",point,point.userData.mathObject,index);
-                // console.log(vertices[index], point.userData.mathObject.x);
-                // vertices[index] = point.userData.mathObject.x;
-                // console.log(vertices[index], point.userData.mathObject.x);
-                // index ++;
-                vertices[index++] = point.userData.mathObject.x;
-                vertices[index++] = point.userData.mathObject.y;
-                vertices[index++] = point.userData.mathObject.z;
-                // console.log(vertices[index - 3], vertices[index - 2], vertices[index - 1]);
+                point.userData.triangleRefers.push({index: j, triangle: triangle});
+                let pointPosition = point.userData.mathObject.clone().sub(faceObject.position);
+                positionAttribute.setXYZ(i * 3 + j, pointPosition.x, pointPosition.y, pointPosition.z);
             }
+            let pA = triangle.points[0].userData.mathObject;
+            let pB = triangle.points[1].userData.mathObject;
+            let pC = triangle.points[2].userData.mathObject;
+            cb.subVectors(pC, pB);
+            ab.subVectors(pA, pB);
+            cb.cross(ab);
+            triangle.normal.copy(cb);
         }
-        // console.log(vertices);
-        geometry.getAttribute('position').needsUpdate = true; // todo I still don't know what this does or if I need it
-        // set start and count in geometry
-        geometry.setDrawRange(0, 3 * 3 * faceObject.userData.triangleRefers.length);
+        positionAttribute.needsUpdate = true;
 
-        geometry.computeVertexNormals();
+        // geometry.computeVertexNormals();
+
+        let normalAttribute = geometry.getAttribute('normal');
+        if (normalAttribute === undefined || normalAttribute.array.length < arraySize) {
+            if (normalAttribute !== undefined) normalAttribute.dispose();
+            normalAttribute = new THREE.BufferAttribute(new Float32Array(arraySize), 3);
+            geometry.setAttribute('normal', normalAttribute);
+        }
+
+        faceObject.userData.runningAverageNormal.set(0, 0, 0);
+
+        for (let i = 0; i < triangleCount; i++) {
+            let triangle = faceObject.userData.triangleRefers[i];
+            let normal = triangle.normal;
+            faceObject.userData.runningAverageNormal.add(normal);
+            normalAttribute.setXYZ(i * 3 + 0, normal.x, normal.y, normal.z);
+            normalAttribute.setXYZ(i * 3 + 1, normal.x, normal.y, normal.z);
+            normalAttribute.setXYZ(i * 3 + 2, normal.x, normal.y, normal.z);
+        }
+
+        const globalNormal = false; // todo se zafrknav :( trebashe da e true, ama updates kje se poteshki taka
+        if (globalNormal)
+            for (let i = 0; i < triangleCount * 3; i++) {
+                normalAttribute.setXYZ(i, faceObject.userData.runningAverageNormal.x, faceObject.userData.runningAverageNormal.y, faceObject.userData.runningAverageNormal.z);
+            }
+
+        normalAttribute.needsUpdate = true;
         geometry.normalizeNormals();
-        return geometry;
     }
 
 }
