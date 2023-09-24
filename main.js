@@ -28,6 +28,7 @@ const onDoubleClickPosition = new THREE.Vector2();
 const params = {
     number: 10,
     addCube: addCube,
+    subdivide: () => subdivide(selection ? selection.object : undefined),
     export: () => {
         console.log("wait");
     },
@@ -98,6 +99,110 @@ function render() {
     renderer.render(scene, camera);
 }
 
+function getNewVertex(verticesPosition1, verticesPosition2, verticesPosition3, i) {
+    let pointObject = new Points();
+    let point = new THREE.Vector3(verticesPosition1, verticesPosition2, verticesPosition3);
+
+    pointObject.userData.index = i / 3;
+    pointObject.userData.mathObject = point;
+    pointObject.userData.linesStart = [];
+    pointObject.userData.linesEnd = [];
+    pointObject.userData.triangleRefers = [];
+    pointObject.userData.position = new THREE.Vector3(0, 0, 0);
+    pointObject.userData.locked = false;
+
+
+    let bufferGeometry = (new THREE.BufferGeometry()).setFromPoints([new THREE.Vector3(0, 0, 0)]);
+    pointObject.position.copy(point);
+    pointObject.userData.position.copy(pointObject.position);
+    pointObject.geometry = bufferGeometry;
+
+    pointObject.material = new THREE.PointsMaterial({color: 0xff00ff, size: 15, sizeAttenuation: false});
+    return pointObject;
+}
+
+function getNewEdge(vertex1, vertex2, i) {
+    let lineObject = new THREE.Line();
+
+    lineObject.userData.startPoint = vertex1;
+    lineObject.userData.startPoint.userData.linesStart.push(lineObject);
+    lineObject.userData.endPoint = vertex2;
+    lineObject.userData.endPoint.userData.linesEnd.push(lineObject);
+    lineObject.userData.faceRefers = [];
+    lineObject.userData.triangleRefers = [];
+
+    let point1 = lineObject.userData.startPoint.userData.mathObject;
+    let point2 = lineObject.userData.endPoint.userData.mathObject;
+    let line = new THREE.Line3(point1, point2);
+
+    lineObject.userData.index = i;
+    lineObject.userData.mathObject = line;
+    lineObject.userData.position = new THREE.Vector3(0, 0, 0);
+    lineObject.userData.locked = false;
+
+    let midPoint = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
+    let startPoint = point1.clone().sub(midPoint);
+    let endPoint = point2.clone().sub(midPoint);
+    let lineGeometry = (new THREE.BufferGeometry()).setFromPoints([startPoint, endPoint]);
+    lineObject.position.copy(midPoint);
+    lineObject.userData.position.copy(lineObject.position);
+    lineObject.geometry = lineGeometry;
+
+    lineObject.material = new THREE.LineBasicMaterial({
+        color: Math.random() * 0xffffff,
+        linewidth: 2,
+    });
+    return lineObject;
+}
+
+function getNewFace(edgeList, i) {
+    let faceObject = new THREE.Mesh();
+    let edgeCount = edgeList.length;
+
+    let edges = new Array(edgeCount);
+    for (let i = 0; i < edgeCount; i++) {
+        edges[i] = {
+            par: faceObject,
+            edge: edgeList[i],
+            prev: undefined,
+            next: undefined,
+            dir: true
+        };
+    }
+
+    for (let i = 0; i < edgeCount; i++) {
+        if (i === 0) edges[i].prev = edges[edgeCount - 1];
+        else edges[i].prev = edges[i - 1];
+        if (i + 1 < edgeCount) edges[i].next = edges[i + 1];
+        else edges[i].next = edges[0];
+
+        if ([edges[i].next.edge.userData.startPoint, edges[i].next.edge.userData.endPoint].includes(edges[i].edge.userData.startPoint)) {
+            edges[i].dir = false;
+        }
+
+        edges[i].edge.userData.faceRefers.push({index: i, face: faceObject});
+    }
+
+    faceObject.userData.index = i;
+    faceObject.userData.mathObject = edges[0];
+    faceObject.userData.edgeCount = edgeCount;
+    faceObject.userData.triangleRefers = [];
+    faceObject.userData.runningAveragePoints = new THREE.Vector3(0, 0, 0);
+    faceObject.userData.runningAverageNormal = new THREE.Vector3(0, 0, 0);
+    faceObject.userData.position = new THREE.Vector3(0, 0, 0);
+    faceObject.userData.locked = false;
+
+
+    getFaceGeometry(faceObject);
+
+    faceObject.material = new THREE.MeshNormalMaterial({
+        // color: Math.random() * 0xffffff,
+        // wireframe: true,
+    });
+
+    return faceObject;
+}
+
 function addCube(dim = 250) {
     let containerGroup = new THREE.Group();
     containerGroup.userData.groupClass = "container";
@@ -117,28 +222,8 @@ function addCube(dim = 250) {
         dimHalf, dimHalf, dimHalf
     ]);
     for (let i = 0; i < verticesPositions.length; i += 3) {
-        let pointObject = new Points();
-
-        let point = new THREE.Vector3(verticesPositions[i], verticesPositions[i + 1], verticesPositions[i + 2]);
-
-        pointObject.userData.index = i / 3;
-        pointObject.userData.mathObject = point;
-        pointObject.userData.linesStart = [];
-        pointObject.userData.linesEnd = [];
-        pointObject.userData.triangleRefers = [];
-        pointObject.userData.position = new THREE.Vector3(0, 0, 0);
-        pointObject.userData.locked = false;
-
+        let pointObject = getNewVertex(verticesPositions[i], verticesPositions[i + 1], verticesPositions[i + 2], i);
         vertices.add(pointObject);
-
-        // pointObject.matrixWorldNeedsUpdate = true; // todo research this
-
-        let bufferGeometry = (new THREE.BufferGeometry()).setFromPoints([new THREE.Vector3(0, 0, 0)]);
-        pointObject.position.copy(point);
-        pointObject.userData.position.copy(pointObject.position);
-        pointObject.geometry = bufferGeometry;
-
-        pointObject.material = new THREE.PointsMaterial({color: 0xff00ff, size: 15, sizeAttenuation: false});
     }
     vertices.visible = false;
     containerGroup.add(vertices);
@@ -150,38 +235,13 @@ function addCube(dim = 250) {
         // 0     1     2     3     4     5     6     7     8     9    10    11
     ]);
     for (let i = 0; i < edgesIndices.length; i += 2) {
-        let lineObject = new THREE.Line();
-
         let index1 = edgesIndices[i], index2 = edgesIndices[i + 1];
-        lineObject.userData.startPoint = vertices.children[index1];
-        lineObject.userData.startPoint.userData.linesStart.push(lineObject);
-        lineObject.userData.endPoint = vertices.children[index2];
-        lineObject.userData.endPoint.userData.linesEnd.push(lineObject);
-        lineObject.userData.faceRefers = [];
-        lineObject.userData.triangleRefers = [];
+        let vertex1 = vertices.children[index1];
+        let vertex2 = vertices.children[index2];
 
-        let point1 = lineObject.userData.startPoint.userData.mathObject;
-        let point2 = lineObject.userData.endPoint.userData.mathObject;
-        let line = new THREE.Line3(point1, point2);
+        let lineObject = getNewEdge(vertex1, vertex2, (i/2)|0);
 
-        lineObject.userData.index = i / 2;
-        lineObject.userData.mathObject = line;
-        lineObject.userData.position = new THREE.Vector3(0, 0, 0);
-        lineObject.userData.locked = false;
         edges.add(lineObject);
-
-        let midPoint = new THREE.Vector3().addVectors(point1, point2).divideScalar(2);
-        let startPoint = point1.clone().sub(midPoint);
-        let endPoint = point2.clone().sub(midPoint);
-        let lineGeometry = (new THREE.BufferGeometry()).setFromPoints([startPoint, endPoint]);
-        lineObject.position.copy(midPoint);
-        lineObject.userData.position.copy(lineObject.position);
-        lineObject.geometry = lineGeometry;
-
-        lineObject.material = new THREE.LineBasicMaterial({
-            color: Math.random() * 0xffffff,
-            linewidth: 2,
-        });
     }
     edges.visible = false;
     containerGroup.add(edges);
@@ -197,59 +257,18 @@ function addCube(dim = 250) {
         7, 8, 11, 10
     ]);
     for (let i = 0; i < faceIndices.length; i += 4) {
-        let faceObject = new THREE.Mesh();
 
         let index1 = faceIndices[i], index2 = faceIndices[i + 1], index3 = faceIndices[i + 2],
             index4 = faceIndices[i + 3];
-        let edge1 = {par: faceObject, ref: edges.children[index1], prev: undefined, next: undefined, dir: true};
-        let edge2 = {par: faceObject, ref: edges.children[index2], prev: undefined, next: undefined, dir: true};
-        let edge3 = {par: faceObject, ref: edges.children[index3], prev: undefined, next: undefined, dir: true};
-        let edge4 = {par: faceObject, ref: edges.children[index4], prev: undefined, next: undefined, dir: true};
+        let edge1 = edges.children[index1];
+        let edge2 = edges.children[index2];
+        let edge3 = edges.children[index3];
+        let edge4 = edges.children[index4];
+        let edgeList = [edge1, edge2, edge3, edge4];
 
-        if ([edge2.ref.userData.startPoint, edge2.ref.userData.endPoint].includes(edge1.ref.userData.startPoint)) {
-            edge1.dir = false;
-        }
-        if ([edge3.ref.userData.startPoint, edge3.ref.userData.endPoint].includes(edge2.ref.userData.startPoint)) {
-            edge2.dir = false;
-        }
-        if ([edge4.ref.userData.startPoint, edge4.ref.userData.endPoint].includes(edge3.ref.userData.startPoint)) {
-            edge3.dir = false;
-        }
-        if ([edge1.ref.userData.startPoint, edge1.ref.userData.endPoint].includes(edge4.ref.userData.startPoint)) {
-            edge4.dir = false;
-        }
-
-        edge1.next = edge2;
-        edge1.prev = edge4;
-        edge2.next = edge3;
-        edge2.prev = edge1;
-        edge3.next = edge4;
-        edge3.prev = edge2;
-        edge4.next = edge1;
-        edge4.prev = edge3;
-
-        edge1.ref.userData.faceRefers.push(edge1);
-        edge2.ref.userData.faceRefers.push(edge2);
-        edge3.ref.userData.faceRefers.push(edge3);
-        edge4.ref.userData.faceRefers.push(edge4);
-
-        faceObject.userData.index = i / 4;
-        faceObject.userData.mathObject = edge1;
-        faceObject.userData.edgeCount = 4;
-        faceObject.userData.triangleRefers = [];
-        faceObject.userData.runningAveragePoints = new THREE.Vector3(0, 0, 0);
-        faceObject.userData.runningAverageNormal = new THREE.Vector3(0, 0, 0);
-        faceObject.userData.position = new THREE.Vector3(0, 0, 0);
-        faceObject.userData.locked = false;
+        let faceObject = getNewFace(edgeList, (i/4)|0);
 
         faces.add(faceObject);
-
-        getFaceGeometry(faceObject);
-
-        faceObject.material = new THREE.MeshNormalMaterial({
-            // color: Math.random() * 0xffffff,
-            // wireframe: true,
-        });
     }
     containerGroup.add(faces);
     // console.log(faces);
@@ -281,6 +300,7 @@ function addGui() {
     gui = new GUI();
     gui.add(params, 'number');
     gui.add(params, 'addCube');
+    gui.add(params, 'subdivide');
     gui.add(params, 'export');
 }
 
@@ -404,26 +424,18 @@ function initSignals() {
     });
 }
 
-
 function addTransformControls() {
     transformControls.addEventListener('change', function () {
         const object = transformControls.object;
         if (object !== undefined) {
             if (showEditPoints && isSelectedPoint(object)) {
-                console.log("moving point", object);
+                /*console.log("moving point", object);*/
                 updateVertex(object, object.position);
             } else if (showEditLines && isSelectedLine(object)) {
-                console.log("moving line", object);
+                /*console.log("moving line", object);*/
                 updateEdge(object, object.position);
-                // let position = object.userData.position;
-                // let startPoint = object.userData.startPoint;
-                // let endPoint = object.userData.endPoint;
-                // startPoint.userData.position.copy(object.position).sub(position).add(startPoint.userData.mathObject);
-                // endPoint.userData.position.copy(object.position).sub(position).add(endPoint.userData.mathObject);
-                // updateVertex(startPoint, startPoint.userData.position);
-                // updateVertex(endPoint, endPoint.userData.position);
             } else if (showEditFaces && allowEditFaces && isSelectedFace(object)) {
-                console.log("moving face");
+                /*console.log("moving face");*/
                 updateFace(object, object.position);
             }
         }
@@ -606,8 +618,8 @@ function getFaceGeometry(faceObject, offset = 0) {
 
     let points = [];
     for (let edge of edges) {
-        if (edge.dir) points.push(edge.ref.userData.startPoint);
-        else points.push(edge.ref.userData.endPoint);
+        if (edge.dir) points.push(edge.edge.userData.startPoint);
+        else points.push(edge.edge.userData.endPoint);
     }
 
     faceObject.userData.runningAveragePoints.set(0, 0, 0);
@@ -659,7 +671,7 @@ function getFaceGeometry(faceObject, offset = 0) {
 
         for (let j = 0; j < triangle.edges.length; j++) {
             let edge = triangle.edges[j];
-            edge.ref.userData.triangleRefers.push({index: j, triangle: triangle});
+            edge.edge.userData.triangleRefers.push({index: j, triangle: triangle});
         }
 
         for (let j = 0; j < triangle.points.length; j++) {
@@ -761,7 +773,7 @@ function updateVertex(vertex, new_position) {
         faceNormal.setXYZ(triangle.index * 3, normalized.x, normalized.y, normalized.z);
         faceNormal.setXYZ(triangle.index * 3 + 1, normalized.x, normalized.y, normalized.z);
         faceNormal.setXYZ(triangle.index * 3 + 2, normalized.x, normalized.y, normalized.z);
-        faceNormal.needsUpdate = true; // todo remove; ahahahahaha, now I learned what needsUpdate means
+        faceNormal.needsUpdate = true; // todo remove comment; ahahahahaha, now I learned what needsUpdate means
     }
 }
 
@@ -779,24 +791,59 @@ function updateEdge(edge, new_position) {
 function updateFace(face, new_position) {
     face.position.copy(new_position);
     face.userData.locked = true;
-    let translation = object.position.clone().sub(object.userData.position);
+    let translation = face.position.clone().sub(face.userData.position);
 
     let firstEdge = face.userData.mathObject;
     let secondEdges = [firstEdge];
     while (secondEdges[secondEdges.length - 1].next !== firstEdge && secondEdges[secondEdges.length - 1].next.next !== firstEdge) secondEdges.push(secondEdges[secondEdges.length - 1].next.next);
 
     for (let edge of secondEdges) {
-        updateEdge(edge.ref, edge.ref.position.clone().add(translation));
+        updateEdge(edge.edge, edge.edge.position.clone().add(translation));
     }
 
     if (face.userData.edgeCount % 2 !== 0) {
         let edge = secondEdges[secondEdges.length - 1].next;
-        let vertex = edge.dir ? edge.ref.userData.startPoint : edge.ref.userData.endPoint;
+        let vertex = edge.dir ? edge.edge.userData.startPoint : edge.edge.userData.endPoint;
         updateVertex(vertex, vertex.position.clone().add(translation));
     }
 
     face.userData.locked = false;
     face.userData.position.copy(face.position);
+}
+
+function subdivide(object) {
+    if (object === null || object === undefined) return;
+    parent = getParent(object);
+    let vertices = parent.children[0];
+    let edges = parent.children[1];
+    let faces = parent.children[2];
+    console.log(vertices, edges, faces);
+    if (isSelectedFace(object)) {
+        if (!allowEditFaces || !showEditFaces) return;
+    }
+    if (isSelectedLine(object)) { // todo maybe redo, at this point I gave up anything smart and went for the brute force because I don't have time
+        if (!showEditLines) return;
+        // let old_edge = object;
+        // let edgeMiddle = old_edge.position;
+        // let new_vertex = getNewVertex(edgeMiddle.x, edgeMiddle.y, edgeMiddle.z, vertices.children.length);
+        // let edge1 = getNewEdge(old_edge.userData.startPoint, new_vertex, old_edge.index);
+        // let edge2 = getNewEdge(new_vertex, old_edge.userData.endPoint, edges.length);
+        //
+        // let faces = [];
+        //
+        // for(let faceRefer of old_edge.userData.faceRefers){
+        //     faces.push({index:faceRefer.index, edges: []});
+        //     let edgeRefer = faceRefer.face.userData.mathObject;
+        //     for(let i = 0 ; i < faceRefer.index ; i ++){
+        //         edgeRefer = edgeRefer.next;
+        //     }
+        //     for(let edgeRefer2 = edgeRefer.next ; edgeRefer2 !== edgeRefer ; edgeRefer2 = edgeRefer2.next){
+        //         faces[faces.length - 1].edges.push(edgeRefer2);
+        //     }
+        // }
+        //
+    }
+    console.log("what are you subdividing: ", object);
 }
 
 
