@@ -43,6 +43,11 @@ const params = {
     export: () => {
         console.log("wait");
     },
+    selectFace: () => {
+        // select the first face to which a line is connected
+        if (!selection) return;
+        if (isObjectLine(selection.object)) select({object:selection.object.userData.faceRefers.face});
+    }
 };
 
 let objectPositionOnDown = null;
@@ -63,7 +68,7 @@ function init() {
     scene.background = new THREE.Color(0x555555);
     scene.add(new THREE.AxesHelper(2000));
 
-    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 10000);
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
     camera.position.set(300, 250, 1000);
     scene.add(camera);
 
@@ -293,11 +298,8 @@ function getNewFace(edgeList) {
     faceObject.userData.position = new THREE.Vector3();
     for (let i = edgeList.length - 1; i >= 0; i--) {
         addDoubleRef(edgeList[i], faceObject, "edge", "face", "faceRefers", "edges"); // todo remove comment, I've been debuging the wrong call....
-        // console.log(faceObject.userData.edges);
         faceObject.userData.position.add(edgeList[i].userData.position);
-        console.log(edgeList[i].userData.position);
     }
-    console.log("");
     faceObject.userData.position.divideScalar(edgeCount);
     faceObject.position.copy(faceObject.userData.position);
 
@@ -381,7 +383,6 @@ function addCube(dim = 250) {
         addToContainer(faces, getNewFace(edgeList));
     }
     containerGroup.add(faces);
-    // console.log(faces);
 
     vertices.visible = true;
     edges.visible = true;
@@ -415,6 +416,7 @@ function addGui() {
     gui.add(params, 'subdivide');
     gui.add(params, 'removeObject').name("remove selection");
     gui.add(params, 'export');
+    gui.add(params, 'selectFace').name("select face (bcs raycaster is bugged)");
 }
 
 function initSignals() {
@@ -600,12 +602,12 @@ function rayCasting() {
     });
 
     editorSignals.selectionChanged.add(function (new_selection) {
-        if (selection !== undefined && false) { // todo remove this false
+        if (selection !== undefined) {
             getParent(selection.object).traverse(function (child) {
-                if (child.name === "vertices") {
+                if (child.name === "vertices" && false) {// todo remove this false
                     child.visible = false;
                 }
-                if (child.name === "edges") {
+                if (child.name === "edges" && false) {// todo and this false
                     child.visible = false;
                 }
                 if (child.name === "faces") {
@@ -718,7 +720,6 @@ function onMouseDown(event) {
 }
 
 function getMousePosition(dom, x, y) {
-    // console.log(dom);
     const rect = dom.getBoundingClientRect();
     return [(x - rect.left) / rect.width, (y - rect.top) / rect.height];
 }
@@ -907,8 +908,6 @@ function calculateFaceGeometry(face) {
         directions[i] = dir;
     }
 
-    console.log(directions);
-
     let vertices = new Array(pointCount);
     for (let i = 0; i < pointCount; i++) {
         let dir = directions[i];
@@ -916,9 +915,6 @@ function calculateFaceGeometry(face) {
         else vertices[i] = edges[i].userData.edgeEnd.vertex;
         addFaceVertex(face, vertices[i]);
     }
-    console.log(edges.map(e => [e.userData.edgeStart.vertex.position, e.userData.edgeEnd.vertex.position]));
-    console.log(vertices.map(v => v.position));
-    console.log(face);
 
     for (let i = 0; i < triangleCount; i++) {
         let topEdge = edges[((i / 2) | 0)];
@@ -930,8 +926,6 @@ function calculateFaceGeometry(face) {
         let bottomVertex = vertices[vertices.length - 1 - (((i + 1) / 2) | 0)];
         let vertex = (i % 2 === 0) ? bottomVertex : topVertex;
 
-        console.log(edge.userData.edgeStart.vertex.position, edge.userData.edgeEnd.vertex.position, vertex.position);
-
         addTriangle(face, edge, edgeDirection, vertex, true); //todo updnorm set to false
     }
 
@@ -940,8 +934,8 @@ function calculateFaceGeometry(face) {
     geometry.index.needsUpdate = true;
     geometry.needsUpdate = true;
     geometry.matrixWorldNeedsUpdate = true;
-
-    // console.log(geometry);
+    geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
 
 
     // for (let i = 0; i < triangleCount; i++) {
@@ -1151,17 +1145,19 @@ function updateFace(face, new_position) {
     face.userData.locked = true;
     let translation = face.position.clone().sub(face.userData.position);
 
-    let firstEdge = face.userData.mathObject;
-    let secondEdges = [firstEdge];
-    while (secondEdges[secondEdges.length - 1].next !== firstEdge && secondEdges[secondEdges.length - 1].next.next !== firstEdge) secondEdges.push(secondEdges[secondEdges.length - 1].next.next);
+    let secondEdge = face.userData.edges["faceNext"];
+    let secondEdges = [secondEdge];
+    while (secondEdges[secondEdges.length - 1]["faceNext"] !== undefined && secondEdges[secondEdges.length - 1]["faceNext"]["faceNext"] !== undefined) secondEdges.push(secondEdges[secondEdges.length - 1]["faceNext"]["faceNext"]);
 
     for (let edge of secondEdges) {
         updateEdge(edge.edge, edge.edge.position.clone().add(translation));
     }
 
     if (face.userData.edgeCount % 2 !== 0) {
-        let edge = secondEdges[secondEdges.length - 1].next;
-        let vertex = edge.dir ? edge.edge.userData.startPoint : edge.edge.userData.endPoint;
+        console.log(secondEdges[secondEdges.length - 1]);
+        let edge = secondEdges[secondEdges.length - 1]["faceNext"];
+        console.log(edge);
+        let vertex = edge.dir ? edge.edge.userData.edgeEnd.vertex : edge.edge.userData.edgeStart.vertex;
         updateVertex(vertex, vertex.position.clone().add(translation));
     }
 
@@ -1222,7 +1218,6 @@ function subdivide(object) {
     let vertices = getVertexContainer(parent);
     let edges = getEdgeContainer(parent);
     let faces = getFaceContainer(parent);
-    // console.log(vertices, edges, faces);
     if (isObjectFace(object)) {
         if (!allowEditFaces || !showEditFaces) return;
         return;
@@ -1235,9 +1230,7 @@ function subdivide(object) {
         let edgeEnd = old_edge.userData.edgeEnd.vertex;
 
         let faceEdges = [];
-        // console.log("old");
         for (let faceRefer = old_edge.userData.faceRefers; faceRefer !== undefined; faceRefer = faceRefer["edgeNext"]) {
-            // console.log(faceRefer);
             faceEdges.push({
                 forward: [],
                 backward: [],
@@ -1259,7 +1252,6 @@ function subdivide(object) {
                 if (newVar.includes(faceRefer.edge.userData.edgeStart.vertex)) faceEdges[faceEdges.length - 1].dir = false;
             }
         }
-        // console.log("new");
         removeEdge(old_edge);
 
         let new_vertex = getNewVertex(edgeMiddle.x, edgeMiddle.y, edgeMiddle.z);
@@ -1268,16 +1260,16 @@ function subdivide(object) {
         let edge2 = getNewEdge(new_vertex, edgeEnd);
         addToContainer(edges, edge1);
         addToContainer(edges, edge2);
-        select({object: getParent(new_vertex)});
         let i = 0;
-
         for (let faceEdge of faceEdges) {
-            // if (i++ == 0) continue;
             let face = getNewFace(
                 faceEdge.backward.reverse().concat(faceEdge.dir ? [edge1, edge2] : [edge2, edge1]).concat(faceEdge.forward)
             );
-            // console.log("5", face);
             addToContainer(faces, face);
+            if (i++ === 0) {
+                console.log("new selection");
+                select({object: face});
+            }
         }
         render();
         return;
