@@ -43,11 +43,8 @@ const params = {
     export: () => {
         console.log("wait");
     },
-    selectFace: () => {
-        // select the first face to which a line is connected
-        if (!selection) return;
-        if (isObjectLine(selection.object)) select({object:selection.object.userData.faceRefers.face});
-    }
+    selectFace: () =>
+        (selection && isObjectLine(selection.object)) ? select({object: selection.object.userData.faceRefers.face}) : undefined,
 };
 
 let objectPositionOnDown = null;
@@ -1154,9 +1151,7 @@ function updateFace(face, new_position) {
     }
 
     if (face.userData.edgeCount % 2 !== 0) {
-        console.log(secondEdges[secondEdges.length - 1]);
         let edge = secondEdges[secondEdges.length - 1]["faceNext"];
-        console.log(edge);
         let vertex = edge.dir ? edge.edge.userData.edgeEnd.vertex : edge.edge.userData.edgeStart.vertex;
         updateVertex(vertex, vertex.position.clone().add(translation));
     }
@@ -1218,10 +1213,6 @@ function subdivide(object) {
     let vertices = getVertexContainer(parent);
     let edges = getEdgeContainer(parent);
     let faces = getFaceContainer(parent);
-    if (isObjectFace(object)) {
-        if (!allowEditFaces || !showEditFaces) return;
-        return;
-    }
     if (isObjectLine(object)) {
         if (!showEditLines) return;
         let old_edge = object;
@@ -1236,6 +1227,7 @@ function subdivide(object) {
                 backward: [],
                 dir: true,
             });
+            // console.log(faceRefer.dir); // todo make this work
             for (let edgeRefer = faceRefer["faceNext"]; edgeRefer !== undefined; edgeRefer = edgeRefer["faceNext"]) {
                 faceEdges[faceEdges.length - 1].forward.push(edgeRefer.edge);
             }
@@ -1260,17 +1252,70 @@ function subdivide(object) {
         let edge2 = getNewEdge(new_vertex, edgeEnd);
         addToContainer(edges, edge1);
         addToContainer(edges, edge2);
-        let i = 0;
         for (let faceEdge of faceEdges) {
             let face = getNewFace(
                 faceEdge.backward.reverse().concat(faceEdge.dir ? [edge1, edge2] : [edge2, edge1]).concat(faceEdge.forward)
             );
             addToContainer(faces, face);
-            if (i++ === 0) {
-                console.log("new selection");
-                select({object: face});
-            }
         }
+        select({object: new_vertex});
+        render();
+        return [edge1, edge2];
+    } else if (isObjectFace(object)) {
+        if (!allowEditFaces || !showEditFaces) return;
+        let old_face = object;
+        let faceMiddle = old_face.position;
+        let faceEdges = [];
+        for (let edgeRefer = old_face.userData.edges; edgeRefer !== undefined; edgeRefer = edgeRefer["faceNext"]) {
+            let next_item = {edge: edgeRefer.edge, dir: true};
+            let ngEdge = edgeRefer["faceNext"];
+            let flipped = false;
+            if (ngEdge === undefined) {
+                ngEdge = faceEdges[faceEdges.length - 1].edge;
+                next_item.dir = !next_item.dir;
+            }else ngEdge = ngEdge.edge;
+            let ng_v1 = ngEdge.userData.edgeStart.vertex;
+            let ng_v2 = ngEdge.userData.edgeEnd.vertex;
+            let c_st = edgeRefer.edge.userData.edgeStart.vertex;
+            if (ng_v1 === c_st || ng_v2 === c_st) next_item.dir = !next_item.dir;
+
+
+            faceEdges.push(next_item);
+        }
+        console.log(faceEdges);
+        removeFace(old_face);
+
+        let new_vertex = getNewVertex(faceMiddle.x, faceMiddle.y, faceMiddle.z);
+        addToContainer(vertices, new_vertex);
+
+        let new_edges = [];
+        let center_edges = [];
+        for (let edge of faceEdges) {
+            let result = subdivide(edge.edge);
+            if(edge.dir){
+                new_edges.push(result[0]);
+                new_edges.push(result[1]);
+            }else{
+                new_edges.push(result[1]);
+                new_edges.push(result[0]);
+            }
+            let edge_center_vertex = result[0].userData.edgeEnd.vertex;
+
+            let new_edge = getNewEdge(new_vertex, edge_center_vertex);
+            center_edges.push(new_edge);
+            addToContainer(edges, new_edge);
+        }
+        for(let i = 0,j=0 ; i < new_edges.length ; i+=2,j++){
+            let edge1 = new_edges[i];
+            let edge4 = new_edges[(i-1+new_edges.length)%new_edges.length];
+            let edge2 = center_edges[j];
+            let edge3 = center_edges[(j-1+center_edges.length)%center_edges.length];
+            let face = getNewFace([edge1, edge2, edge4, edge3]);
+            console.log(face);
+            faces.add(face);
+        }
+
+        select({object: new_vertex});
         render();
         return;
     }
