@@ -600,16 +600,15 @@ function rayCasting() {
     });
 
     editorSignals.selectionChanged.add(function (new_selection) {
-        if (selection !== undefined && false) { // todo remove this && false
+        if (selection !== undefined && false) { // todo remove this false
             getParent(selection.object).traverse(function (child) {
-                if (child.userData.groupClass === "vertices") {
-                    child.visible = false;
-                    console.log(child);
-                }
-                if (child.userData.groupClass === "edges") {
+                if (child.name === "vertices") {
                     child.visible = false;
                 }
-                if (child.userData.groupClass === "faces") {
+                if (child.name === "edges") {
+                    child.visible = false;
+                }
+                if (child.name === "faces") {
                     child.visible = true;
                 }
             });
@@ -621,13 +620,13 @@ function rayCasting() {
             selection = new_selection;
 
             getParent(selection.object).traverse(function (child) {
-                if (showEditPoints && child.userData.groupClass === "vertices") {
+                if (showEditPoints && child.name === "vertices") {
                     child.visible = true;
                 }
-                if (showEditLines && child.userData.groupClass === "edges") {
+                if (showEditLines && child.name === "edges") {
                     child.visible = true;
                 }
-                if (!showEditFaces && child.userData.groupClass === "faces") {
+                if (!showEditFaces && child.name === "faces") {
                     child.visible = false;
                 }
             });
@@ -655,6 +654,10 @@ function getIntersects(point) {
         if (!(child instanceof THREE.Group))
             _objects.push(child);
     });
+    // console.log(_objects);
+    // if(_objects.length)
+    //     console.log(raycaster.intersectObject(_objects[_objects.length-1]));
+    // todo debug why Mesh isn't intersected by the raycaster
 
     return raycaster.intersectObjects(_objects, true); //todo this has bugs or I am not using it right
 
@@ -935,8 +938,8 @@ function calculateFaceGeometry(face) {
     geometry.getAttribute('position').needsUpdate = true;
     geometry.getAttribute('normal').needsUpdate = true;
     geometry.index.needsUpdate = true;
-    geometry.needsUpdate;
-    geometry.matrixWorldNeedsUpdate;
+    geometry.needsUpdate = true;
+    geometry.matrixWorldNeedsUpdate = true;
 
     // console.log(geometry);
 
@@ -1088,7 +1091,7 @@ function updateVertex(vertex, new_position) {
                 positionAttribute.needsUpdate = true;
 
                 updateTriangleNormal(triangle, face);
-                updateFaceNormal(face); // todo replace with optimized running average (bellow too)
+                updateFaceNormal(face); // todo replace with optimized running average (above too)
 
             }
 
@@ -1106,6 +1109,39 @@ function updateEdge(edge, new_position) {
     updateVertex(edgeStart, edgeStart.position.add(translation));
     let edgeEnd = edge.userData.edgeEnd.vertex;
     updateVertex(edgeEnd, edgeEnd.position.add(translation));
+
+    for (let ref of edge.userData.triangleRefers) {
+        let face = ref.face;
+        if (face.userData.locked) continue;
+        let triangle = ref.triangle;
+
+        let geometry = face.geometry;
+
+        let positionAttribute = geometry.getAttribute("position");
+        let indexAttribute = geometry.index;
+
+        let newPoint1 = edgeStart.position.clone().sub(face.position);
+        let newPoint2 = edgeEnd.position.clone().sub(face.position);
+
+        let indexInd = triangle.ind;
+        let vertexPositionInd1, vertexPositionInd2;
+        if (triangle.edgeDirection) {
+            vertexPositionInd1 = indexAttribute.getX(indexInd);
+            vertexPositionInd2 = indexAttribute.getY(indexInd);
+        } else {
+            vertexPositionInd2 = indexAttribute.getX(indexInd);
+            vertexPositionInd1 = indexAttribute.getY(indexInd);
+        }
+
+        positionAttribute.setXYZ(vertexPositionInd1, newPoint1.x, newPoint1.y, newPoint1.z);
+        positionAttribute.setXYZ(vertexPositionInd2, newPoint2.x, newPoint2.y, newPoint2.z);
+        positionAttribute.needsUpdate = true;
+
+        updateTriangleNormal(triangle, face);
+        updateFaceNormal(face); // todo replace with optimized running average
+    }
+
+
     edge.userData.locked = false;
     edge.userData.position.copy(edge.position);
 }
