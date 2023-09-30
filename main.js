@@ -4,7 +4,7 @@ import WebGL from 'three/addons/capabilities/WebGL.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GUI} from "three/addons/libs/lil-gui.module.min";
 import {TransformControls} from "three/addons/controls/TransformControls";
-import {Toolbar} from "/Toolbar.js";
+import {Toolbar} from "Toolbar";
 
 let container, stats, gui;
 let camera, scene, renderer;
