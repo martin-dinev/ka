@@ -39,6 +39,7 @@ const params = {
     number: 10,
     addCube: addCube,
     subdivide: () => subdivide(selection ? selection.object : undefined),
+    extrude: () => extrude(selection ? selection.object : undefined),
     removeObject: () => removeObject(selection ? selection.object : undefined),
     export: () => {
         console.log("wait");
@@ -410,6 +411,7 @@ function addGui() {
     gui.add(params, 'number');
     gui.add(params, 'addCube');
     gui.add(params, 'subdivide');
+    gui.add(params, 'extrude');
     gui.add(params, 'removeObject').name("remove selection");
     gui.add(params, 'export');
     gui.add(params, 'selectFace').name("select face (bcs raycaster is bugged)");
@@ -1268,11 +1270,10 @@ function subdivide(object) {
         for (let edgeRefer = old_face.userData.edges; edgeRefer !== undefined; edgeRefer = edgeRefer["faceNext"]) {
             let next_item = {edge: edgeRefer.edge, dir: true};
             let ngEdge = edgeRefer["faceNext"];
-            let flipped = false;
             if (ngEdge === undefined) {
                 ngEdge = faceEdges[faceEdges.length - 1].edge;
                 next_item.dir = !next_item.dir;
-            }else ngEdge = ngEdge.edge;
+            } else ngEdge = ngEdge.edge;
             let ng_v1 = ngEdge.userData.edgeStart.vertex;
             let ng_v2 = ngEdge.userData.edgeEnd.vertex;
             let c_st = edgeRefer.edge.userData.edgeStart.vertex;
@@ -1289,10 +1290,10 @@ function subdivide(object) {
         let center_edges = [];
         for (let edge of faceEdges) {
             let result = subdivide(edge.edge);
-            if(edge.dir){
+            if (edge.dir) {
                 new_edges.push(result[0]);
                 new_edges.push(result[1]);
-            }else{
+            } else {
                 new_edges.push(result[1]);
                 new_edges.push(result[0]);
             }
@@ -1302,11 +1303,11 @@ function subdivide(object) {
             center_edges.push(new_edge);
             addToContainer(edges, new_edge);
         }
-        for(let i = 0,j=0 ; i < new_edges.length ; i+=2,j++){
+        for (let i = 0, j = 0; i < new_edges.length; i += 2, j++) {
             let edge1 = new_edges[i];
             let edge2 = center_edges[j];
-            let edge3 = center_edges[(j-1+center_edges.length)%center_edges.length];
-            let edge4 = new_edges[(i-1+new_edges.length)%new_edges.length];
+            let edge3 = center_edges[(j - 1 + center_edges.length) % center_edges.length];
+            let edge4 = new_edges[(i - 1 + new_edges.length) % new_edges.length];
             let face = getNewFace([edge1, edge2, edge3, edge4]);
             faces.add(face);
         }
@@ -1316,6 +1317,83 @@ function subdivide(object) {
         return;
     }
     console.log("what are you subdividing: ", object);
+}
+
+//extrude face
+function extrude(object) {
+    if (object === null || object === undefined) return;
+    let parent = getParent(object);
+    let vertices = getVertexContainer(parent);
+    let edges = getEdgeContainer(parent);
+    let faces = getFaceContainer(parent);
+    if (!isObjectFace(object)) return;
+    if (!allowEditFaces || !showEditFaces) return;
+    let old_face = object;
+    let faceEdges = [];
+    for (let edgeRefer = old_face.userData.edges; edgeRefer !== undefined; edgeRefer = edgeRefer["faceNext"]) {
+        faceEdges.push(edgeRefer.edge);
+    }
+    let faceVertices = [];
+    let edge1 = faceEdges[0];
+    let edge1Start = edge1.userData.edgeStart.vertex;
+    let edge1End = edge1.userData.edgeEnd.vertex;
+    let edge2 = faceEdges[1];
+    let edge2Start = edge2.userData.edgeStart.vertex;
+    let edge2End = edge2.userData.edgeEnd.vertex;
+    if (edge2Start === edge1Start || edge2End === edge1Start) faceVertices.push(edge1End);
+    else faceVertices.push(edge1Start);
+
+    for (let i = 1; i < faceEdges.length; i++) {
+        let edge = faceEdges[i-1];
+        let edgeStart = edge.userData.edgeStart.vertex;
+        let edgeEnd = edge.userData.edgeEnd.vertex;
+        if (edgeStart === faceVertices[faceVertices.length - 1]) faceVertices.push(edgeEnd);
+        else faceVertices.push(edgeStart);
+    }
+
+    removeFace(old_face);
+
+    let new_vertices = [];
+    for (let i = 0; i < faceVertices.length; i++) {
+        new_vertices.push(getNewVertex(faceVertices[i].position.x, faceVertices[i].position.y, faceVertices[i].position.z));
+        vertices.add(new_vertices[i]);
+    }
+
+    let new_edges = [];
+    for (let i = 0; i < faceVertices.length; i++) {
+        let edge = getNewEdge(new_vertices[i], new_vertices[(i + 1) % faceVertices.length]);
+        new_edges.push(edge);
+        edges.add(edge);
+    }
+
+    let newFace = getNewFace(new_edges);
+    faces.add(newFace);
+
+    let new_edges2 = [];
+    for (let i = 0; i < faceVertices.length; i++) {
+        let edge = getNewEdge(faceVertices[i], new_vertices[i]);
+        new_edges2.push(edge);
+        edges.add(edge);
+    }
+
+    // let new_faces = [];
+
+
+    // console.log(faceVertices.map(v => v.userData.mathObject), new_vertices.map(v => v.userData.mathObject), faceEdges.map(e => e.userData.mathObject), new_edges.map(e => e.userData.mathObject), new_edges2.map(e => e.userData.mathObject), new_faces, newFace);
+
+    for (let i = 0; i < faceEdges.length; i++) {
+        let edge1 = faceEdges[i];
+        let edge2 = new_edges2[(i + 1) % new_edges2.length];
+        let edge3 = new_edges[i];
+        let edge4 = new_edges2[i];
+        let face = getNewFace([edge1, edge2, edge3, edge4]);
+        // new_faces.push(face);
+        faces.add(face);
+    }
+
+
+    select({object: newFace});
+    render();
 }
 
 
