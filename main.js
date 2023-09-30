@@ -375,7 +375,6 @@ function addCube(dim = 250) {
         let edge4 = edges.children[index4];
         let edgeList = [edge1, edge2, edge3, edge4];
 
-        edgeList = [edge1, edge2, edge3, edge4];
 
         addToContainer(faces, getNewFace(edgeList));
     }
@@ -1279,10 +1278,8 @@ function subdivide(object) {
             let c_st = edgeRefer.edge.userData.edgeStart.vertex;
             if (ng_v1 === c_st || ng_v2 === c_st) next_item.dir = !next_item.dir;
 
-
             faceEdges.push(next_item);
         }
-        console.log(faceEdges);
         removeFace(old_face);
 
         let new_vertex = getNewVertex(faceMiddle.x, faceMiddle.y, faceMiddle.z);
@@ -1307,11 +1304,10 @@ function subdivide(object) {
         }
         for(let i = 0,j=0 ; i < new_edges.length ; i+=2,j++){
             let edge1 = new_edges[i];
-            let edge4 = new_edges[(i-1+new_edges.length)%new_edges.length];
             let edge2 = center_edges[j];
             let edge3 = center_edges[(j-1+center_edges.length)%center_edges.length];
-            let face = getNewFace([edge1, edge2, edge4, edge3]);
-            console.log(face);
+            let edge4 = new_edges[(i-1+new_edges.length)%new_edges.length];
+            let face = getNewFace([edge1, edge2, edge3, edge4]);
             faces.add(face);
         }
 
